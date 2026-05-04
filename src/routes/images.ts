@@ -62,7 +62,28 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
       model,
     });
   } catch (error) {
-    console.error('[images/inspire]', error);
+    if (axios.isAxiosError(error)) {
+      const upstreamStatus = error.response?.status;
+      const upstreamData = error.response?.data as
+        | { error?: { message?: string; status?: string } }
+        | undefined;
+      const message = upstreamData?.error?.message;
+      const status = upstreamData?.error?.status;
+
+      console.error('[images/inspire][upstream]', {
+        upstreamStatus,
+        status,
+        message,
+      });
+
+      return res.status(502).json({
+        error: message ?? 'Gemini request failed',
+        upstreamStatus,
+        upstreamCode: status,
+      });
+    }
+
+    console.error('[images/inspire][unknown]', error);
     return res.status(500).json({ error: 'Failed to generate inspiration image' });
   }
 });
