@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { clothingRouter } from './routes/clothing';
+import { imagesRouter } from './routes/images';
 import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
 
@@ -22,6 +23,7 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/clothing', clothingRouter);
+app.use('/api/images', imagesRouter);
 app.use('/api/outfits', outfitsRouter);
 app.use('/api/stylist', stylistRouter);
 
