@@ -10,9 +10,9 @@ const imageSchema = z.object({
 });
 
 const defaultImageModels = [
-  'gemini-2.0-flash-exp',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-3.1-flash-image-preview',
+  'gemini-2.5-flash-image',
+  'gemini-3-pro-image-preview',
 ];
 
 function modelCandidatesFromEnv(): string[] {
@@ -37,7 +37,8 @@ function isRetryableModelError(message?: string): boolean {
   return (
     normalized.includes('is not found') ||
     normalized.includes('not supported for generatecontent') ||
-    normalized.includes('unsupported model')
+    normalized.includes('unsupported model') ||
+    normalized.includes('does not support the requested response modalities')
   );
 }
 
@@ -81,6 +82,9 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
             ],
             generationConfig: {
               responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: {
+                aspectRatio: '3:4',
+              },
             },
           },
           {
