@@ -19,13 +19,13 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
 
   try {
     await ensureUser(uid);
-    const items = await prisma.clothingItem.findMany({
+    const dbItems = await prisma.clothingItem.findMany({
       where: { userId: uid },
       orderBy: { addedAt: 'desc' },
     });
     
     // Parse JSON string fields back to arrays
-    const formatted = items.map((item) => ({
+    const items = dbItems.map((item: any) => ({
       ...item,
       colors: JSON.parse(item.colors),
       occasions: JSON.parse(item.occasions),
@@ -33,7 +33,7 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
       tags: JSON.parse(item.tags),
     }));
 
-    return res.json(formatted);
+    return res.json(items);
   } catch (error) {
     console.error('[wardrobe/get]', error);
     return res.status(500).json({ error: 'Failed to fetch wardrobe' });

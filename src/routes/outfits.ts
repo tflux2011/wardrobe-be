@@ -35,7 +35,7 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
     }
 
     // Format for Claude service
-    const wardrobe = dbItems.map((item) => ({
+    const wardrobe = dbItems.map((item: any) => ({
       id: item.id,
       name: item.name,
       category: item.category,

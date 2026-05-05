@@ -62,7 +62,7 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       where: { userId: uid },
     });
 
-    const wardrobeContext = dbItems.map((item) => ({
+    const wardrobeContext = dbItems.map((item: any) => ({
       id: item.id,
       name: item.name,
       category: item.category,
