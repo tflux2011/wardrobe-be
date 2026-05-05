@@ -1,22 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const stylistRouter = Router();
 
-function getAnthropicClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey === 'your_anthropic_api_key_here') {
-    throw new Error('ANTHROPIC_API_KEY is not configured');
+function getGeminiModel() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
   }
-  return new Anthropic({ apiKey });
-}
-
-function extractTextReply(content: Anthropic.Messages.Message['content']): string {
-  const textBlock = content.find((block) => block.type === 'text');
-  return textBlock?.type === 'text'
-    ? textBlock.text
-    : "I'm not sure about that one — could you rephrase?";
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
 }
 
 const chatSchema = z.object({
@@ -80,36 +73,28 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
       : "\n\nThe user has not added any wardrobe items yet.";
 
-  const messages: Anthropic.MessageParam[] = [
-    ...history.map((h) => ({
-      role: h.role as 'user' | 'assistant',
-      content: h.content,
-    })),
-    { role: 'user', content: message },
-  ];
-
   try {
-    const client = getAnthropicClient();
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: STYLIST_SYSTEM_PROMPT + wardrobeStr,
-      messages,
+    const model = getGeminiModel();
+
+    // Gemini multi-turn: build history as Content[] and send the latest message
+    const chat = model.startChat({
+      systemInstruction: STYLIST_SYSTEM_PROMPT + wardrobeStr,
+      history: history.map((h) => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }],
+      })),
     });
 
-    const reply = extractTextReply(response.content);
+    const chatResult = await chat.sendMessage(message);
+    const reply = chatResult.response.text() || "I'm not sure about that one — could you rephrase?";
 
     return res.json({ reply });
   } catch (err) {
     console.error('[stylist/chat]', err);
 
-    const message = err instanceof Error ? err.message : 'Unknown stylist error';
-    if (message.includes('ANTHROPIC_API_KEY') || message.includes('authentication method')) {
+    const errMsg = err instanceof Error ? err.message : 'Unknown stylist error';
+    if (errMsg.includes('GEMINI_API_KEY')) {
       return res.status(503).json({ error: 'Stylist service is not configured on the server' });
-    }
-
-    if (message.includes('JSON') || message.includes('empty response')) {
-      return res.status(502).json({ error: 'Stylist service returned an invalid response' });
     }
 
     return res.status(500).json({ error: 'Failed to get stylist response' });

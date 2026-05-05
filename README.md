@@ -40,16 +40,26 @@ Supported variables:
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Yes | Used for image tagging, split-region labeling, outfit suggestions, and stylist chat |
 | `OPENWEATHER_API_KEY` | Yes | Used by the client-facing weather flow |
+| `FIREBASE_WEB_API_KEY` | Yes | Used by backend middleware to verify Firebase ID tokens from `Authorization: Bearer <token>` |
 | `PORT` | No | API port, defaults to `3002` |
 | `ALLOWED_ORIGIN` | No | CORS origin, defaults to `*` |
+| `RATE_LIMIT_WINDOW_MS` | No | Rate limit window for all `/api/*` routes, defaults to `60000` |
+| `RATE_LIMIT_MAX_REQUESTS` | No | Max requests per IP per window on `/api/*`, defaults to `120` |
+| `STYLIST_RATE_LIMIT_WINDOW_MS` | No | Rate limit window for `/api/stylist/*`, defaults to `60000` |
+| `STYLIST_RATE_LIMIT_MAX_REQUESTS` | No | Max requests per IP per window on stylist routes, defaults to `25` |
 
 Example:
 
 ```env
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 OPENWEATHER_API_KEY=your_openweather_api_key_here
+FIREBASE_WEB_API_KEY=your_firebase_web_api_key_here
 PORT=3002
 ALLOWED_ORIGIN=*
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX_REQUESTS=120
+STYLIST_RATE_LIMIT_WINDOW_MS=60000
+STYLIST_RATE_LIMIT_MAX_REQUESTS=25
 ```
 
 ## Install
@@ -108,6 +118,8 @@ Example response:
 
 `POST /api/clothing/upload`
 
+Auth: requires `Authorization: Bearer <Firebase ID token>`
+
 Uploads one image and returns AI-generated tags.
 
 Request:
@@ -116,6 +128,8 @@ Request:
 - field name: `image`
 
 `POST /api/clothing/split`
+
+Auth: requires `Authorization: Bearer <Firebase ID token>`
 
 Uploads one image, detects multiple garments, crops them, and tags each detected item.
 
@@ -133,6 +147,8 @@ Notes:
 ### Outfits
 
 `POST /api/outfits/suggest`
+
+Auth: requires `Authorization: Bearer <Firebase ID token>`
 
 Generates outfit suggestions from wardrobe context.
 
@@ -152,6 +168,8 @@ Expected body shape:
 ### Stylist
 
 `POST /api/stylist/chat`
+
+Auth: requires `Authorization: Bearer <Firebase ID token>`
 
 Runs AI stylist chat with message history and optional wardrobe context.
 

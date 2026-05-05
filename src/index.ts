@@ -10,22 +10,27 @@ import { clothingRouter } from './routes/clothing';
 import { imagesRouter } from './routes/images';
 import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
+import { requireAuth } from './middleware/auth';
+import { requestLogger } from './middleware/request_logger';
+import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
 
 const app = express();
 const PORT = process.env.PORT ?? 3002;
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN ?? '*' }));
+app.use(requestLogger);
 app.use(express.json({ limit: '10mb' }));
 
 // Serve uploaded images as static assets from /uploads/*
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/clothing', clothingRouter);
-app.use('/api/images', imagesRouter);
-app.use('/api/outfits', outfitsRouter);
-app.use('/api/stylist', stylistRouter);
+app.use('/api', apiRateLimiter);
+app.use('/api/clothing', requireAuth, clothingRouter);
+app.use('/api/images', requireAuth, imagesRouter);
+app.use('/api/outfits', requireAuth, outfitsRouter);
+app.use('/api/stylist', stylistRateLimiter, requireAuth, stylistRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {

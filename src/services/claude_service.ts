@@ -1,19 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 
-function getAnthropicClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey === 'your_anthropic_api_key_here') {
-    throw new Error('ANTHROPIC_API_KEY is not configured');
+function getGeminiModel(modelName = 'gemini-2.5-flash'): ReturnType<GoogleGenerativeAI['getGenerativeModel']> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
   }
-
-  return new Anthropic({ apiKey });
-}
-
-function extractTextContent(content: Anthropic.Messages.Message['content']): string {
-  const textBlock = content.find((block) => block.type === 'text');
-  return textBlock?.type === 'text' ? textBlock.text : '';
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
 }
 
 function parseJsonResponse<T>(rawText: string): T {
@@ -230,7 +224,7 @@ export async function detectGarmentRegions(
   imageWidth: number,
   imageHeight: number,
 ): Promise<GarmentRegion[]> {
-  const client = getAnthropicClient();
+  const model = getGeminiModel();
   const ext = path.extname(imagePath).toLowerCase();
   if (ext !== '.jpg' && ext !== '.jpeg' && ext !== '.png') {
     throw new Error('Only JPEG and PNG images are supported');
@@ -240,20 +234,11 @@ export async function detectGarmentRegions(
   const base64Image = imageData.toString('base64');
   const mimeType: 'image/png' | 'image/jpeg' = ext === '.png' ? 'image/png' : 'image/jpeg';
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mimeType, data: base64Image },
-          },
-          {
-            type: 'text',
-            text: `Identify distinct clothing items in this image. The image size is ${imageWidth}x${imageHeight} pixels.
+  const result = await model.generateContent([
+    {
+      inlineData: { data: base64Image, mimeType },
+    },
+    `Identify distinct clothing items in this image. The image size is ${imageWidth}x${imageHeight} pixels.
 
 Return ONLY a JSON array. Each object must use this exact shape:
 [
@@ -274,15 +259,11 @@ Rules:
 - If only one item is visible, return one object.
 - Maximum 6 objects.
 - Return JSON only, no markdown or explanations.`,
-          },
-        ],
-      },
-    ],
-  });
+  ]);
 
-  const text = extractTextContent(response.content);
+  const text = result.response.text();
   if (!text) {
-    throw new Error('Claude returned an empty response for garment detection');
+    throw new Error('Gemini returned an empty response for garment detection');
   }
 
   const raw = parseJsonResponse<GarmentRegion[]>(text);
@@ -307,7 +288,7 @@ export async function tagClothingItem(
   imagePath: string,
   options?: { categoryHint?: ClothingTag['category'] },
 ): Promise<ClothingTag> {
-  const client = getAnthropicClient();
+  const model = getGeminiModel();
   const ext = path.extname(imagePath).toLowerCase();
   if (ext !== '.jpg' && ext !== '.jpeg' && ext !== '.png') {
     throw new Error('Only JPEG and PNG images are supported');
@@ -317,20 +298,11 @@ export async function tagClothingItem(
   const base64Image = imageData.toString('base64');
   const mimeType: 'image/png' | 'image/jpeg' = ext === '.png' ? 'image/png' : 'image/jpeg';
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mimeType, data: base64Image },
-          },
-          {
-            type: 'text',
-            text: `Analyse this clothing item and return a JSON object with these exact fields:
+  const result = await model.generateContent([
+    {
+      inlineData: { data: base64Image, mimeType },
+    },
+    `Analyse this clothing item and return a JSON object with these exact fields:
 {
   "name": "short descriptive name e.g. White linen shirt",
   "category": one of: top | bottom | dress | outerwear | shoes | accessory | bag,
@@ -353,15 +325,11 @@ Safety rules:
 ${options?.categoryHint ? `Likely category hint from prior detection: ${options.categoryHint}. Use this hint unless image clearly contradicts it.` : ''}
 
 Return ONLY the JSON, no explanation.`,
-          },
-        ],
-      },
-    ],
-  });
+  ]);
 
-  const text = extractTextContent(response.content);
+  const text = result.response.text();
   if (!text) {
-    throw new Error('Claude returned an empty response');
+    throw new Error('Gemini returned an empty response');
   }
 
   const parsed = parseJsonResponse<RawClothingTag>(text);
@@ -394,7 +362,7 @@ export async function generateOutfitSuggestions(params: {
   weather: { temp: number; condition: string };
   wardrobe: WardrobeItem[];
 }): Promise<OutfitSuggestion[]> {
-  const client = getAnthropicClient();
+  const model = getGeminiModel();
   const { occasion, weather, wardrobe } = params;
 
   const wardrobeSummary = wardrobe.map((item) => ({
@@ -407,13 +375,8 @@ export async function generateOutfitSuggestions(params: {
     lastWornAt: item.lastWornAt,
   }));
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
-    messages: [
-      {
-        role: 'user',
-        content: `You are a personal stylist. Generate 3 outfit suggestions from this wardrobe.
+  const result = await model.generateContent(
+    `You are a personal stylist. Generate 3 outfit suggestions from this wardrobe.
 
 Occasion: ${occasion}
 Weather: ${weather.temp}°C, ${weather.condition}
@@ -434,13 +397,11 @@ Return ONLY a JSON array of 3 outfits:
     "rationale": "One line explaining why this works"
   }
 ]`,
-      },
-    ],
-  });
+  );
 
-  const text = extractTextContent(response.content);
+  const text = result.response.text();
   if (!text) {
-    throw new Error('Claude returned an empty response');
+    throw new Error('Gemini returned an empty response');
   }
 
   return parseJsonResponse<OutfitSuggestion[]>(text);
