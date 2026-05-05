@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id // Firebase UID
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clothingItems ClothingItem[]
+  outfits       Outfit[]
+}
+
+model ClothingItem {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name           String
+  category       String
+  style          String
+  colors         String    // JSON string array
+  occasions      String    // JSON string array
+  seasons        String    // JSON string array
+  tags           String    // JSON string array
+  
+  imageUrl       String
+  localImagePath String
+  
+  wearCount      Int       @default(0)
+  lastWornAt     DateTime?
+  addedAt        DateTime  @default(now())
+
+  outfitItems    OutfitItem[]
+}
+
+model Outfit {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name      String
+  occasion  String?
+  createdAt DateTime @default(now())
+
+  items     OutfitItem[]
+}
+
+model OutfitItem {
+  id             String       @id @default(uuid())
+  outfitId       String
+  outfit         Outfit       @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+  
+  clothingItemId String
+  clothingItem   ClothingItem @relation(fields: [clothingItemId], references: [id], onDelete: Cascade)
+
+  @@unique([outfitId, clothingItemId])
+}

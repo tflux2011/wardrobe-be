@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { prisma } from '../lib/prisma';
 
 export const stylistRouter = Router();
 
@@ -22,21 +23,6 @@ const chatSchema = z.object({
       }),
     )
     .max(40) // cap history depth to control token spend
-    .default([]),
-  wardrobeContext: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        category: z.string(),
-        colors: z.array(z.string()),
-        style: z.string(),
-        occasions: z.array(z.string()),
-        lastWornAt: z.string().optional(),
-        wearCount: z.number().optional(),
-      }),
-    )
-    .optional()
     .default([]),
 });
 
@@ -61,19 +47,37 @@ Keep responses concise — 2-4 sentences for simple questions, short structured 
 
 // POST /api/stylist/chat
 stylistRouter.post('/chat', async (req: Request, res: Response) => {
+  const uid = req.user?.uid;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
   const parsed = chatSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { message, history, wardrobeContext } = parsed.data;
-
-  const wardrobeStr =
-    wardrobeContext && wardrobeContext.length > 0
-      ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
-      : "\n\nThe user has not added any wardrobe items yet.";
+  const { message, history } = parsed.data;
 
   try {
+    const dbItems = await prisma.clothingItem.findMany({
+      where: { userId: uid },
+    });
+
+    const wardrobeContext = dbItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      colors: JSON.parse(item.colors),
+      style: item.style,
+      occasions: JSON.parse(item.occasions),
+      lastWornAt: item.lastWornAt?.toISOString(),
+      wearCount: item.wearCount,
+    }));
+
+    const wardrobeStr =
+      wardrobeContext && wardrobeContext.length > 0
+        ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
+        : "\n\nThe user has not added any wardrobe items yet.";
+
     const model = getGeminiModel();
 
     // Gemini multi-turn: build history as Content[] and send the latest message

@@ -10,9 +10,11 @@ import { clothingRouter } from './routes/clothing';
 import { imagesRouter } from './routes/images';
 import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
+import { wardrobeRouter } from './routes/wardrobe';
 import { requireAuth } from './middleware/auth';
 import { requestLogger } from './middleware/request_logger';
 import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
+import { startCleanupSchedule } from './tasks/cleanup';
 
 const app = express();
 const PORT = process.env.PORT ?? 3002;
@@ -27,6 +29,7 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api', apiRateLimiter);
+app.use('/api/wardrobe', requireAuth, wardrobeRouter);
 app.use('/api/clothing', requireAuth, clothingRouter);
 app.use('/api/images', requireAuth, imagesRouter);
 app.use('/api/outfits', requireAuth, outfitsRouter);
@@ -53,4 +56,5 @@ app.use(
 
 app.listen(PORT, () => {
   console.log(`Wardrobe backend running on http://localhost:${PORT}`);
+  startCleanupSchedule();
 });

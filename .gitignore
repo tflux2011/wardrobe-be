@@ -14,3 +14,4 @@ node_modules/
 dist/
 uploads/
 .DS_Store
+/src/generated/prisma
