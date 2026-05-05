@@ -1,6 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+
+const PERMANENT_DIR = path.join(__dirname, '..', '..', 'uploads', 'permanent');
+if (!fs.existsSync(PERMANENT_DIR)) {
+  fs.mkdirSync(PERMANENT_DIR, { recursive: true });
+}
+
+function saveImageToDisk(base64: string): string {
+  const filename = `${crypto.randomUUID()}.png`;
+  const filepath = path.join(PERMANENT_DIR, filename);
+  fs.writeFileSync(filepath, Buffer.from(base64, 'base64'));
+  return `/uploads/permanent/${filename}`;
+}
 
 export const imagesRouter = Router();
 
@@ -58,7 +73,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
     ? `\n\nUse this wardrobe context for inspiration only:\n${JSON.stringify(parsed.data.wardrobeContext, null, 2)}`
     : '';
 
-  const prompt = `Create a polished fashion inspiration image. Do not render app UI or text overlays. Focus on editorial styling and coherent outfit composition. ${parsed.data.prompt}${wardrobeSummary}`;
+  const prompt = `Create a polished fashion inspiration image. Do not render app UI or text overlays. Focus on editorial styling and coherent outfit composition. The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. ${parsed.data.prompt}${wardrobeSummary}`;
 
   try {
     if (models.length === 0) {
@@ -104,8 +119,11 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
           continue;
         }
 
+        const imageUrl = saveImageToDisk(imagePart.inlineData.data);
+
         return res.json({
-          imageBase64: imagePart.inlineData.data,
+          imageBase64: imagePart.inlineData.data, // Keeping for backward compatibility
+          imageUrl,
           mimeType: imagePart.inlineData.mimeType ?? 'image/png',
           model,
         });
@@ -201,7 +219,7 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
     : '';
 
   const generateView = async (view: 'front' | 'back') => {
-    const prompt = `Generate a clean, professional product-style outfit presentation. Show the complete ${view} view of the outfit. ${parsed.data.prompt}${wardrobeSummary} Studio neutral background, centered, no watermarks, no text.`;
+    const prompt = `Generate a clean, professional product-style outfit presentation. Show the complete ${view} view of the outfit. ${parsed.data.prompt}${wardrobeSummary} The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. Studio lighting, no watermarks, no text.`;
 
     for (const model of models) {
       try {
@@ -241,9 +259,12 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
       generateView('back'),
     ]);
 
+    const frontUrl = saveImageToDisk(frontBase64);
+    const backUrl = saveImageToDisk(backBase64);
+
     return res.json({
-      front: { imageBase64: frontBase64, mimeType: 'image/png' },
-      back: { imageBase64: backBase64, mimeType: 'image/png' },
+      front: { imageBase64: frontBase64, imageUrl: frontUrl, mimeType: 'image/png' },
+      back: { imageBase64: backBase64, imageUrl: backUrl, mimeType: 'image/png' },
     });
   } catch (error) {
     if (axios.isAxiosError(error)) {
