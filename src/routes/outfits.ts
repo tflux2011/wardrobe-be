@@ -11,6 +11,14 @@ const suggestSchema = z.object({
     temp: z.number(),
     condition: z.string().min(1),
   }),
+  styleProfile: z
+    .object({
+      skinTone: z.string().min(1).max(64),
+      undertone: z.string().min(1).max(64),
+      contrast: z.string().min(1).max(64),
+      gender: z.string().min(1).max(32),
+    })
+    .optional(),
 });
 
 // POST /api/outfits/suggest
@@ -23,7 +31,7 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { occasion, weather } = parsed.data;
+  const { occasion, weather, styleProfile } = parsed.data;
 
   try {
     const dbItems = await prisma.clothingItem.findMany({
@@ -47,7 +55,12 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
       lastWornAt: item.lastWornAt?.toISOString(),
     }));
 
-    const suggestions = await generateOutfitSuggestions({ occasion, weather, wardrobe });
+    const suggestions = await generateOutfitSuggestions({
+      occasion,
+      weather,
+      wardrobe,
+      styleProfile,
+    });
     return res.json(suggestions);
   } catch (err) {
     console.error('[outfits/suggest]', err);

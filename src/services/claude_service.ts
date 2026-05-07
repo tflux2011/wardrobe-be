@@ -361,9 +361,15 @@ export async function generateOutfitSuggestions(params: {
   occasion: string;
   weather: { temp: number; condition: string };
   wardrobe: WardrobeItem[];
+  styleProfile?: {
+    skinTone: string;
+    undertone: string;
+    contrast: string;
+    gender: string;
+  };
 }): Promise<OutfitSuggestion[]> {
   const model = getGeminiModel();
-  const { occasion, weather, wardrobe } = params;
+  const { occasion, weather, wardrobe, styleProfile } = params;
 
   const wardrobeSummary = wardrobe.map((item) => ({
     id: item.id,
@@ -381,6 +387,7 @@ export async function generateOutfitSuggestions(params: {
 Occasion: ${occasion}
 Weather: ${weather.temp}°C, ${weather.condition}
 Wardrobe: ${JSON.stringify(wardrobeSummary, null, 2)}
+${styleProfile ? `Style profile: ${JSON.stringify(styleProfile, null, 2)}` : ''}
 
 Rules:
 - Each outfit needs at least a top + bottom (or dress)
@@ -388,6 +395,7 @@ Rules:
 - Prioritise items not worn recently (lastWornAt is older or null)
 - Items must actually be in the wardrobe (use real IDs)
 - Consider colour coordination
+- Ensure color and contrast choices flatter the style profile when provided
 
 Return ONLY a JSON array of 3 outfits:
 [

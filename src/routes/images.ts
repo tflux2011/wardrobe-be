@@ -22,6 +22,14 @@ export const imagesRouter = Router();
 const imageSchema = z.object({
   prompt: z.string().min(8).max(2000),
   wardrobeContext: z.array(z.record(z.any())).optional().default([]),
+  styleProfile: z
+    .object({
+      skinTone: z.string().min(1).max(64),
+      undertone: z.string().min(1).max(64),
+      contrast: z.string().min(1).max(64),
+      gender: z.string().min(1).max(32),
+    })
+    .optional(),
 });
 
 const defaultImageModels = [
@@ -217,9 +225,26 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
   const wardrobeSummary = parsed.data.wardrobeContext.length > 0
     ? `\n\nUse this wardrobe context:\n${JSON.stringify(parsed.data.wardrobeContext, null, 2)}`
     : '';
+  const styleProfileSummary = parsed.data.styleProfile
+    ? `\n\nUser style profile: ${JSON.stringify(parsed.data.styleProfile, null, 2)}`
+    : '';
 
   const generateView = async (view: 'front' | 'back') => {
-    const prompt = `Generate a clean, professional product-style outfit presentation. Show the complete ${view} view of the outfit. ${parsed.data.prompt}${wardrobeSummary} The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. Studio lighting, no watermarks, no text.`;
+    const viewInstruction = view === 'front'
+      ? 'Camera faces the mannequin from the front. Entire mannequin visible from head to feet.'
+      : 'Camera faces the mannequin from the back. Entire mannequin visible from head to feet. Back of outfit only.';
+    const prompt = `Generate exactly ONE product-style fashion preview image.
+Subject rules (mandatory):
+- Exactly one full-body retail mannequin only.
+- Entire mannequin must be visible from head to feet in frame.
+- No human model, no real person, no extra bodies, no reflections.
+- No collage, diptych, side-by-side, split-screen, before/after, or tiled layout.
+- No front-and-back combined in one image.
+- No text, watermark, logo, UI, props, or background scene.
+View requirement: ${viewInstruction}
+Output style: studio catalog photo, neutral studio lighting, white seamless or transparent background.
+Garment fit: all selected outfit pieces should appear correctly worn on the mannequin with realistic drape.
+${parsed.data.prompt}${wardrobeSummary}${styleProfileSummary}`;
 
     for (const model of models) {
       try {
@@ -227,7 +252,14 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           {
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { responseModalities: ['image'] },
+            generationConfig: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: { aspectRatio: '9:16' },
+            },
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 60000,
           },
         );
 
