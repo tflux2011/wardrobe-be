@@ -13,6 +13,7 @@ export const clothingRouter = Router();
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
 const SPLITS_DIR = path.join(UPLOADS_DIR, 'splits');
 const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
+const MAX_SPLIT_REGIONS = 4;
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -248,19 +249,21 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image file provided' });
   }
+  const uploadedPath = req.file.path;
+  const uploadedFilename = req.file.filename;
 
   try {
-    const metadata = await sharp(req.file.path).metadata();
+    const metadata = await sharp(uploadedPath).metadata();
     if (!metadata.width || !metadata.height) {
       return res.status(400).json({ error: 'Could not read image dimensions' });
     }
 
-    const regions = await detectGarmentRegions(req.file.path, metadata.width, metadata.height);
-    const selectedRegions = regions.slice(0, 6);
+    const regions = await detectGarmentRegions(uploadedPath, metadata.width, metadata.height);
+    const selectedRegions = regions.slice(0, MAX_SPLIT_REGIONS);
 
     if (selectedRegions.length <= 1) {
-      const singleTags = await tagClothingItem(req.file.path);
-      const imageUrl = `/uploads/${req.file.filename}`;
+      const singleTags = await tagClothingItem(uploadedPath);
+      const imageUrl = `/uploads/${uploadedFilename}`;
       return res.json({
         items: [{
           ...singleTags,
@@ -270,9 +273,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
       });
     }
 
-    const items: Array<Record<string, unknown>> = [];
-
-    for (const region of selectedRegions) {
+    const itemResults = await Promise.allSettled(selectedRegions.map(async (region) => {
       const filename = `${randomUUID()}.png`;
       const outputPath = path.join(SPLITS_DIR, filename);
       const expanded = expandRegion(
@@ -281,7 +282,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         metadata.height,
       );
 
-      await sharp(req.file.path)
+      await sharp(uploadedPath)
         .extract({
           left: expanded.x,
           top: expanded.y,
@@ -291,35 +292,36 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         .png()
         .toFile(outputPath);
 
-      try {
-        const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
-        const enhancedImageUrl = await generateFullGarmentImage(outputPath, {
-          category: tags.category,
-          colors: tags.colors,
-          style: tags.style,
-          name: tags.name,
-        });
-        items.push({
-          ...tags,
-          imageUrl: enhancedImageUrl ?? `/uploads/splits/${filename}`,
-          source: 'split',
-          box: {
-            x: region.x,
-            y: region.y,
-            width: region.width,
-            height: region.height,
-          },
-        });
-      } catch (tagErr) {
-        console.error('[clothing/split][tag]', tagErr);
-      }
-    }
+      const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
+      return {
+        ...tags,
+        // Split preview should return the crop immediately. Generating a polished
+        // product image for every detected item can exceed mobile/proxy limits.
+        imageUrl: `/uploads/splits/${filename}`,
+        source: 'split',
+        box: {
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+        },
+      };
+    }));
+
+    const items = itemResults
+      .flatMap((result) => {
+        if (result.status === 'fulfilled') {
+          return [result.value];
+        }
+        console.error('[clothing/split][tag]', result.reason);
+        return [];
+      });
 
     if (items.length === 0) {
       return res.status(502).json({ error: 'Could not tag detected garments from image' });
     }
 
-    fs.unlink(req.file.path, () => undefined);
+    fs.unlink(uploadedPath, () => undefined);
     return res.json({ items });
   } catch (err) {
     console.error('[clothing/split]', err);
