@@ -263,7 +263,13 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
 
     if (selectedRegions.length <= 1) {
       const singleTags = await tagClothingItem(uploadedPath);
-      const imageUrl = `/uploads/${uploadedFilename}`;
+      const enhancedImageUrl = await generateFullGarmentImage(uploadedPath, {
+        category: singleTags.category,
+        colors: singleTags.colors,
+        style: singleTags.style,
+        name: singleTags.name,
+      });
+      const imageUrl = enhancedImageUrl ?? `/uploads/${uploadedFilename}`;
       return res.json({
         items: [{
           ...singleTags,
