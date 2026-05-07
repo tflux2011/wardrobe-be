@@ -12,7 +12,7 @@ export const clothingRouter = Router();
 // Ensure uploads directory exists
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
 const SPLITS_DIR = path.join(UPLOADS_DIR, 'splits');
-const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
+const PERMANENT_DIR = path.join(UPLOADS_DIR, 'permanent');
 const MAX_SPLIT_REGIONS = 4;
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -20,8 +20,8 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 if (!fs.existsSync(SPLITS_DIR)) {
   fs.mkdirSync(SPLITS_DIR, { recursive: true });
 }
-if (!fs.existsSync(GENERATED_DIR)) {
-  fs.mkdirSync(GENERATED_DIR, { recursive: true });
+if (!fs.existsSync(PERMANENT_DIR)) {
+  fs.mkdirSync(PERMANENT_DIR, { recursive: true });
 }
 
 function imageModelCandidates(): string[] {
@@ -90,7 +90,7 @@ async function generateFullGarmentImage(
   const categoryHint = hints?.category ? ` Garment type: ${hints.category}.` : '';
   const nameHint = hints?.name ? ` Item name: ${hints.name}.` : '';
 
-  const prompt = `Given the reference garment image, generate a complete full-length product-style image of the same clothing item.${categoryHint}${nameHint}${colorHint}${styleHint} Keep the exact garment design and texture. Show the full clothing piece centered, uncropped, neutral studio background, no mannequin, no person, no text, no watermark.`;
+  const prompt = `Given the reference garment image, generate a complete full-length product-style image of the same clothing item.${categoryHint}${nameHint}${colorHint}${styleHint} Keep the exact garment design and texture. The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. No mannequin, no person, no text, no watermark.`;
 
   for (const model of models) {
     try {
@@ -133,9 +133,9 @@ async function generateFullGarmentImage(
       }
 
       const generatedFilename = `${randomUUID()}_full.png`;
-      const generatedPath = path.join(GENERATED_DIR, generatedFilename);
+      const generatedPath = path.join(PERMANENT_DIR, generatedFilename);
       fs.writeFileSync(generatedPath, Buffer.from(generatedBase64, 'base64'));
-      return `/uploads/generated/${generatedFilename}`;
+      return `/uploads/permanent/${generatedFilename}`;
     } catch (error) {
       if (!axios.isAxiosError(error)) {
         continue;
