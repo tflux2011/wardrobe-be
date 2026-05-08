@@ -10,7 +10,7 @@ function getGeminiModel() {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
-  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-flash-latest' });
 }
 
 const chatSchema = z.object({
