@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 
-function getGeminiModel(modelName = 'gemini-1.5-flash'): ReturnType<GoogleGenerativeAI['getGenerativeModel']> {
+function getGeminiModel(modelName = 'gemini-flash-latest'): ReturnType<GoogleGenerativeAI['getGenerativeModel']> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
@@ -11,8 +11,27 @@ function getGeminiModel(modelName = 'gemini-1.5-flash'): ReturnType<GoogleGenera
 }
 
 function parseJsonResponse<T>(rawText: string): T {
-  const clean = rawText.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean) as T;
+  try {
+    const jsonMatch = rawText.match(/```json([\s\S]*?)```/);
+    const clean = jsonMatch ? jsonMatch[1].trim() : rawText.replace(/```json|```/g, '').trim();
+    // Also remove any text before the first { or [
+    const firstBrace = clean.indexOf('{');
+    const firstBracket = clean.indexOf('[');
+    const startIndex = (firstBrace !== -1 && firstBracket !== -1) 
+      ? Math.min(firstBrace, firstBracket) 
+      : Math.max(firstBrace, firstBracket);
+    
+    if (startIndex !== -1) {
+      const lastBrace = clean.lastIndexOf('}');
+      const lastBracket = clean.lastIndexOf(']');
+      const endIndex = Math.max(lastBrace, lastBracket) + 1;
+      return JSON.parse(clean.substring(startIndex, endIndex)) as T;
+    }
+    return JSON.parse(clean) as T;
+  } catch (error) {
+    console.error('Failed to parse Gemini JSON:', rawText);
+    throw error;
+  }
 }
 
 export interface ClothingTag {
