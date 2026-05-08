@@ -51,6 +51,7 @@ const createItemSchema = z.object({
   tags: z.array(z.string()),
   imageUrl: z.string(),
   localImagePath: z.string().optional().default(''),
+  price: z.number().nullable().optional(),
 });
 
 // POST /api/wardrobe
@@ -80,6 +81,7 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
         tags: JSON.stringify(data.tags),
         imageUrl: data.imageUrl,
         localImagePath: data.localImagePath,
+        price: data.price,
       },
     });
 

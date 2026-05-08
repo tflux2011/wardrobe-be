@@ -17,6 +17,7 @@ model User {
 
   clothingItems ClothingItem[]
   outfits       Outfit[]
+  trips         Trip[]
 }
 
 model ClothingItem {
@@ -35,6 +36,7 @@ model ClothingItem {
   imageUrl       String
   localImagePath String
   
+  price          Float?
   wearCount      Int       @default(0)
   lastWornAt     DateTime?
   addedAt        DateTime  @default(now())
@@ -63,4 +65,20 @@ model OutfitItem {
   clothingItem   ClothingItem @relation(fields: [clothingItemId], references: [id], onDelete: Cascade)
 
   @@unique([outfitId, clothingItemId])
+}
+
+model Trip {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  destination  String
+  startDate    DateTime
+  endDate      DateTime
+  purpose      String
+  
+  packingList  String   // JSON string array of clothing item IDs
+  dailyOutfits String   // JSON string of daily outfits
+  
+  createdAt    DateTime @default(now())
 }

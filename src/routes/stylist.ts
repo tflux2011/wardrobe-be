@@ -104,3 +104,58 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Failed to get stylist response' });
   }
 });
+
+// POST /api/stylist/challenge
+stylistRouter.post('/challenge', async (req: Request, res: Response) => {
+  const uid = req.user?.uid;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { itemId } = req.body;
+  if (!itemId) {
+    return res.status(400).json({ error: 'itemId is required' });
+  }
+
+  try {
+    const dbItems = await prisma.clothingItem.findMany({
+      where: { userId: uid },
+    });
+
+    const targetItem = dbItems.find(i => i.id === itemId);
+    if (!targetItem) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const { generateStylingChallenge } = await import('../services/claude_service');
+
+    const wardrobeContext = dbItems.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      colors: JSON.parse(item.colors),
+      style: item.style,
+      occasions: JSON.parse(item.occasions),
+      seasons: JSON.parse(item.seasons),
+      tags: JSON.parse(item.tags),
+      lastWornAt: item.lastWornAt?.toISOString(),
+    }));
+
+    const suggestions = await generateStylingChallenge({
+      targetItem: {
+        id: targetItem.id,
+        name: targetItem.name,
+        category: targetItem.category,
+        colors: JSON.parse(targetItem.colors),
+        style: targetItem.style,
+        occasions: JSON.parse(targetItem.occasions),
+        seasons: JSON.parse(targetItem.seasons),
+        tags: JSON.parse(targetItem.tags),
+      },
+      wardrobe: wardrobeContext,
+    });
+
+    return res.json({ suggestions });
+  } catch (error) {
+    console.error('[stylist/challenge]', error);
+    return res.status(500).json({ error: 'Failed to generate styling challenge' });
+  }
+});

@@ -11,6 +11,7 @@ import { imagesRouter } from './routes/images';
 import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
 import { wardrobeRouter } from './routes/wardrobe';
+import tripsRouter from './routes/trips';
 import { requireAuth } from './middleware/auth';
 import { requestLogger } from './middleware/request_logger';
 import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
@@ -33,6 +34,7 @@ app.use('/api/wardrobe', requireAuth, wardrobeRouter);
 app.use('/api/clothing', requireAuth, clothingRouter);
 app.use('/api/images', requireAuth, imagesRouter);
 app.use('/api/outfits', requireAuth, outfitsRouter);
+app.use('/api/trips', requireAuth, tripsRouter);
 app.use('/api/stylist', stylistRateLimiter, requireAuth, stylistRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
