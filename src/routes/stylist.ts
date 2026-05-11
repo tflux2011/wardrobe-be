@@ -15,6 +15,7 @@ function getGeminiModel() {
 
 const chatSchema = z.object({
   message: z.string().min(1).max(2000),
+  contextText: z.string().optional(),
   history: z
     .array(
       z.object({
@@ -55,7 +56,7 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { message, history } = parsed.data;
+  const { message, history, contextText } = parsed.data;
 
   try {
     const dbItems = await prisma.clothingItem.findMany({
@@ -73,10 +74,14 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       wearCount: item.wearCount,
     }));
 
-    const wardrobeStr =
+    let wardrobeStr =
       wardrobeContext && wardrobeContext.length > 0
         ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
         : "\n\nThe user has not added any wardrobe items yet.";
+
+    if (contextText) {
+      wardrobeStr += `\n\nADDITIONAL CONTEXT (e.g. Current Outfit or Item being viewed):\n${contextText}\nWhen answering the user, refer to this context if relevant.`;
+    }
 
     const model = getGeminiModel();
 
