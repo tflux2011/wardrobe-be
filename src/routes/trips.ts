@@ -22,6 +22,7 @@ router.get('/', async (req, res) => {
       ...t,
       packingList: JSON.parse(t.packingList),
       dailyOutfits: JSON.parse(t.dailyOutfits),
+      suggestedAdditions: JSON.parse(t.suggestedAdditions || '[]'),
     })));
   } catch (error) {
     console.error('Error fetching trips:', error);
@@ -83,6 +84,7 @@ router.post('/plan', async (req, res) => {
         purpose,
         packingList: JSON.stringify(plan.packingList),
         dailyOutfits: JSON.stringify(plan.dailyOutfits),
+        suggestedAdditions: JSON.stringify(plan.suggestedAdditions || []),
       },
     });
 
@@ -90,6 +92,7 @@ router.post('/plan', async (req, res) => {
       ...trip,
       packingList: plan.packingList,
       dailyOutfits: plan.dailyOutfits,
+      suggestedAdditions: plan.suggestedAdditions || [],
     });
 
   } catch (error) {

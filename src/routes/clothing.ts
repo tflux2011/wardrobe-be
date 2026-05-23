@@ -5,7 +5,8 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import axios from 'axios';
-import { detectGarmentRegions, tagClothingItem } from '../services/claude_service';
+import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches } from '../services/claude_service';
+import { prisma } from '../lib/prisma';
 
 export const clothingRouter = Router();
 
@@ -336,5 +337,66 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
     }
 
     return res.status(500).json({ error: 'Failed to split and analyse image' });
+  }
+});
+
+// POST /api/clothing/match
+// Accepts multipart/form-data with field "image"
+// Tags store garment and recommends top 3 matching items in their closet
+clothingRouter.post('/match', (req: Request, res: Response, next) => {
+  handleSingleImageUpload(req, res, next);
+}, async (req: Request, res: Response) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No image file provided' });
+  }
+
+  const uid = req.user?.uid;
+  if (!uid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    // 1. Tag photographed retail garment using AI
+    const tags = await tagClothingItem(req.file.path);
+
+    // 2. Fetch user's existing wardrobe items
+    const wardrobe = await prisma.clothingItem.findMany({
+      where: { userId: uid },
+    });
+
+    const storeItem = {
+      name: tags.name,
+      category: tags.category,
+      colors: tags.colors,
+      style: tags.style,
+      occasions: tags.occasions,
+      seasons: tags.seasons,
+      tags: tags.tags,
+    };
+
+    let matches: any[] = [];
+    if (wardrobe.length > 0) {
+      // 3. Select top 3 matches using AI stylist matcher
+      matches = await generateStoreItemMatches({
+        storeItem,
+        wardrobe,
+      });
+    }
+
+    // Publicly accessible URL relative to origin
+    const imageUrl = `/uploads/${req.file.filename}`;
+
+    return res.json({
+      storeItem: {
+        ...tags,
+        imageUrl,
+      },
+      matches,
+    });
+  } catch (err) {
+    // Clean up file upload
+    fs.unlink(req.file.path, () => undefined);
+    console.error('[clothing/match]', err);
+    return res.status(500).json({ error: 'Failed to process store item match' });
   }
 });

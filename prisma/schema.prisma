@@ -79,6 +79,7 @@ model Trip {
   
   packingList  String   // JSON string array of clothing item IDs
   dailyOutfits String   // JSON string of daily outfits
+  suggestedAdditions String @default("[]")
   
   createdAt    DateTime @default(now())
 }

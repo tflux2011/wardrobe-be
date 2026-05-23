@@ -449,6 +449,11 @@ Return ONLY a JSON array of 3 outfits:
 export interface TripPlan {
   packingList: string[];
   dailyOutfits: any[];
+  suggestedAdditions: Array<{
+    name: string;
+    category: string;
+    reason: string;
+  }>;
 }
 
 /**
@@ -478,6 +483,13 @@ Return ONLY a JSON object with this shape:
       "day": 1,
       "outfit": { "name": "Day 1 Outfit", "itemIds": ["id1"], "rationale": "Perfect for travel" }
     }
+  ],
+  "suggestedAdditions": [
+    {
+      "name": "E.g., White Linen Trousers",
+      "category": "bottom",
+      "reason": "Great addition for warm evenings in Rome and coordinates with your denim jacket."
+    }
   ]
 }`
   );
@@ -488,4 +500,67 @@ Return ONLY a JSON object with this shape:
   }
 
   return parseJsonResponse<TripPlan>(text);
+}
+
+export interface StoreItemMatch {
+  clothingItemId: string;
+  rationale: string;
+}
+
+/**
+ * Find matching closet items that coordinate beautifully with a retail store item.
+ */
+export async function generateStoreItemMatches(params: {
+  storeItem: {
+    name: string;
+    category: string;
+    colors: string[];
+    style: string;
+    occasions: string[];
+    seasons: string[];
+    tags: string[];
+  };
+  wardrobe: any[];
+}): Promise<StoreItemMatch[]> {
+  const model = getGeminiModel('gemini-2.5-flash', { temperature: 0.7 });
+  const { storeItem, wardrobe } = params;
+
+  const wardrobeSummary = wardrobe.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    colors: JSON.parse(item.colors),
+    style: item.style,
+    occasions: JSON.parse(item.occasions),
+    tags: JSON.parse(item.tags),
+  }));
+
+  const result = await model.generateContent(
+    `You are a personal stylist. A user is in a store and took a picture of a potential new clothing item they want to buy.
+    
+Store Item details:
+${JSON.stringify(storeItem, null, 2)}
+
+User's Existing Wardrobe:
+${JSON.stringify(wardrobeSummary, null, 2)}
+
+Select the top 3 best matching items from their existing wardrobe that would work perfectly with this new store item to create stylish outfits.
+
+For each of the 3 matching items, explain briefly (one clear sentence) why they coordinate well together (color matching, style harmony, layering options, etc.).
+
+Return ONLY a JSON array of the top 3 matches:
+[
+  {
+    "clothingItemId": "closet-item-id-1",
+    "rationale": "One sentence explaining why this matches the new store item."
+  }
+]`
+  );
+
+  const text = result.response.text();
+  if (!text) {
+    throw new Error('Gemini returned an empty response');
+  }
+
+  return parseJsonResponse<StoreItemMatch[]>(text);
 }
