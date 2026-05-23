@@ -13,6 +13,7 @@ import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
 import { wardrobeRouter } from './routes/wardrobe';
 import tripsRouter from './routes/trips';
+import { userRouter } from './routes/user';
 import { requireAuth } from './middleware/auth';
 import { requestLogger } from './middleware/request_logger';
 import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
@@ -32,6 +33,7 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api', apiRateLimiter);
 app.use('/api/admin', adminRouter);
+app.use('/api/user', userRouter); // Router handles auth requirements internally
 app.use('/api/wardrobe', requireAuth, wardrobeRouter);
 app.use('/api/clothing', requireAuth, clothingRouter);
 app.use('/api/images', requireAuth, imagesRouter);
