@@ -1,13 +1,32 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { supabase } from '../lib/supabase';
+import { requireAuth } from '../middleware/auth';
 
 export const userRouter = Router();
+
+userRouter.use(requireAuth);
+
+// GET /api/user/status
+// Checks if the authenticated user's email is in the whitelist.
+userRouter.get('/status', async (req: Request, res: Response) => {
+  const email = (req as any).user?.email?.toLowerCase().trim();
+  
+  if (!email) {
+    return res.json({ isWhitelisted: false });
+  }
+
+  const whitelisted = await prisma.whitelistedEmail.findUnique({
+    where: { email }
+  });
+
+  return res.json({ isWhitelisted: !!whitelisted });
+});
 
 // DELETE /api/user
 // Permanently deletes the user and all associated data from the database.
 userRouter.delete('/', async (req: Request, res: Response) => {
-  const uid = req.user?.uid;
+  const uid = (req as any).user?.uid;
   
   if (!uid) {
     return res.status(401).json({ error: 'Unauthorized' });

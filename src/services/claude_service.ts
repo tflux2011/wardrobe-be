@@ -2,36 +2,23 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 
-function getGeminiModel(modelName = 'gemini-flash-latest'): ReturnType<GoogleGenerativeAI['getGenerativeModel']> {
+function getGeminiModel(
+  modelName = 'gemini-2.5-flash',
+  generationConfig?: any
+): ReturnType<GoogleGenerativeAI['getGenerativeModel']> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
-  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    model: modelName,
+    generationConfig,
+  });
 }
 
 function parseJsonResponse<T>(rawText: string): T {
-  try {
-    const jsonMatch = rawText.match(/```json([\s\S]*?)```/);
-    const clean = jsonMatch ? jsonMatch[1].trim() : rawText.replace(/```json|```/g, '').trim();
-    // Also remove any text before the first { or [
-    const firstBrace = clean.indexOf('{');
-    const firstBracket = clean.indexOf('[');
-    const startIndex = (firstBrace !== -1 && firstBracket !== -1) 
-      ? Math.min(firstBrace, firstBracket) 
-      : Math.max(firstBrace, firstBracket);
-    
-    if (startIndex !== -1) {
-      const lastBrace = clean.lastIndexOf('}');
-      const lastBracket = clean.lastIndexOf(']');
-      const endIndex = Math.max(lastBrace, lastBracket) + 1;
-      return JSON.parse(clean.substring(startIndex, endIndex)) as T;
-    }
-    return JSON.parse(clean) as T;
-  } catch (error) {
-    console.error('Failed to parse Gemini JSON:', rawText);
-    throw error;
-  }
+  const clean = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean) as T;
 }
 
 export interface ClothingTag {
@@ -359,7 +346,6 @@ export interface OutfitSuggestion {
   name: string;
   itemIds: string[];
   rationale: string;
-  perfume?: string;
 }
 
 interface WardrobeItem {
@@ -388,7 +374,7 @@ export async function generateOutfitSuggestions(params: {
     gender: string;
   };
 }): Promise<OutfitSuggestion[]> {
-  const model = getGeminiModel();
+  const model = getGeminiModel('gemini-2.5-flash', { temperature: 1.0 });
   const { occasion, weather, wardrobe, styleProfile } = params;
 
   const wardrobeSummary = wardrobe.map((item) => ({
@@ -401,8 +387,14 @@ export async function generateOutfitSuggestions(params: {
     lastWornAt: item.lastWornAt,
   }));
 
+  const randomSeed = Math.random().toString(36).substring(7);
+  const currentTime = new Date().toISOString();
+
   const result = await model.generateContent(
     `You are a personal stylist. Generate 3 outfit suggestions from this wardrobe.
+
+Random seed for styling variety: ${randomSeed} (Generated at: ${currentTime})
+Instruction: Use this seed to introduce creative variety. Try different color combinations, styles, and themes than before. Surprise the user with fresh, creative matches!
 
 Occasion: ${occasion}
 Weather: ${weather.temp}°C, ${weather.condition}
@@ -416,15 +408,13 @@ Rules:
 - Items must actually be in the wardrobe (use real IDs)
 - Consider colour coordination
 - Ensure color and contrast choices flatter the style profile when provided
-- Recommend a suitable perfume/cologne fragrance profile (e.g. "A fresh citrus scent", "A warm woody cologne") that matches the outfit, weather, and occasion.
 
 Return ONLY a JSON array of 3 outfits:
 [
   {
     "name": "Short outfit name",
     "itemIds": ["id1", "id2", "id3"],
-    "rationale": "One line explaining why this works",
-    "perfume": "A short description of a recommended fragrance profile"
+    "rationale": "One line explaining why this works"
   }
 ]`,
   );
@@ -439,69 +429,35 @@ Return ONLY a JSON array of 3 outfits:
 
 export interface TripPlan {
   packingList: string[];
-  dailyOutfits: {
-    day: number;
-    date: string;
-    name: string;
-    itemIds: string[];
-    rationale: string;
-    perfume?: string;
-  }[];
+  dailyOutfits: any[];
 }
 
 /**
- * Generate a smart packing list and daily itinerary using Claude.
+ * Generate a trip plan using Claude/Gemini.
  */
 export async function generateTripPlan(params: {
   destination: string;
   startDate: string;
   endDate: string;
   purpose: string;
-  wardrobe: WardrobeItem[];
-  styleProfile?: {
-    skinTone: string;
-    undertone: string;
-    contrast: string;
-    gender: string;
-  };
+  wardrobe: any[];
+  styleProfile?: any;
 }): Promise<TripPlan> {
   const model = getGeminiModel();
-  const { destination, startDate, endDate, purpose, wardrobe, styleProfile } = params;
-
-  const wardrobeSummary = wardrobe.map((item) => ({
-    id: item.id,
-    name: item.name,
-    category: item.category,
-    colors: item.colors,
-    style: item.style,
-    occasions: item.occasions,
-  }));
+  const { destination, startDate, endDate, purpose, wardrobe } = params;
 
   const result = await model.generateContent(
-    `You are a luxury travel stylist. The user is traveling to ${destination} from ${startDate} to ${endDate}.
-The purpose of the trip is: ${purpose}.
-Their available wardrobe is: ${JSON.stringify(wardrobeSummary, null, 2)}
-${styleProfile ? `Style profile: ${JSON.stringify(styleProfile, null, 2)}` : ''}
+    `You are a personal stylist planning a trip to ${destination} from ${startDate} to ${endDate} for ${purpose}.
+    
+Wardrobe: ${JSON.stringify(wardrobe, null, 2)}
 
-Rules:
-1. Infer the typical weather for ${destination} during these dates.
-2. Select a versatile, minimalist capsule wardrobe from their available items (packingList). Prioritize items that can be mixed and matched.
-3. Generate exactly one outfit per day of the trip.
-4. Each outfit MUST ONLY use items included in the packingList.
-5. Provide a short rationale for why the outfit works for that day's assumed weather and activities.
-6. Suggest a daily perfume/cologne fragrance profile.
-
-Return ONLY a JSON object matching this schema:
+Return ONLY a JSON object with this shape:
 {
-  "packingList": ["item_id_1", "item_id_2"],
+  "packingList": ["id1", "id2"],
   "dailyOutfits": [
     {
       "day": 1,
-      "date": "YYYY-MM-DD",
-      "name": "Travel & Check-in",
-      "itemIds": ["item_id_1", "item_id_2"],
-      "rationale": "Comfortable layers for travel.",
-      "perfume": "A light, fresh citrus scent."
+      "outfit": { "name": "Day 1 Outfit", "itemIds": ["id1"], "rationale": "Perfect for travel" }
     }
   ]
 }`
@@ -513,58 +469,4 @@ Return ONLY a JSON object matching this schema:
   }
 
   return parseJsonResponse<TripPlan>(text);
-}
-
-/**
- * Generate 3 outfits that prominently feature a specific, neglected clothing item.
- */
-export async function generateStylingChallenge(params: {
-  targetItem: WardrobeItem;
-  wardrobe: WardrobeItem[];
-  weather?: { temp: number; condition: string };
-}): Promise<OutfitSuggestion[]> {
-  const model = getGeminiModel();
-  const { targetItem, wardrobe, weather } = params;
-
-  const wardrobeSummary = wardrobe.map((item) => ({
-    id: item.id,
-    name: item.name,
-    category: item.category,
-    colors: item.colors,
-    style: item.style,
-  }));
-
-  const weatherContext = weather 
-    ? `Current Weather: ${weather.temp}°C, ${weather.condition}`
-    : `Assume comfortable, temperate weather.`;
-
-  const result = await model.generateContent(
-    `You are a personal stylist. The user wants to wear a neglected item from their closet:
-Target Item: ${targetItem.name} (Category: ${targetItem.category}, Colors: ${targetItem.colors.join(', ')})
-
-${weatherContext}
-Available Wardrobe: ${JSON.stringify(wardrobeSummary, null, 2)}
-
-Rules:
-1. Generate exactly 3 fresh outfit ideas.
-2. EVERY outfit MUST include the Target Item (id: "${targetItem.id}").
-3. Include at least a top and bottom (or dress) to make a complete outfit.
-4. Only use items from the available wardrobe.
-
-Return ONLY a JSON array of 3 outfits matching this schema:
-[
-  {
-    "name": "Short, catchy outfit name",
-    "itemIds": ["id1", "id2", "${targetItem.id}"],
-    "rationale": "Why this combination makes the target item look great."
-  }
-]`
-  );
-
-  const text = result.response.text();
-  if (!text) {
-    throw new Error('Gemini returned an empty response');
-  }
-
-  return parseJsonResponse<OutfitSuggestion[]>(text);
 }

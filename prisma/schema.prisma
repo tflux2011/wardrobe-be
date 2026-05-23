@@ -82,3 +82,9 @@ model Trip {
   
   createdAt    DateTime @default(now())
 }
+
+model WhitelistedEmail {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  addedAt   DateTime @default(now())
+}

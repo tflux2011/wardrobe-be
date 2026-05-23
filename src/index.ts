@@ -8,11 +8,10 @@ import cors from 'cors';
 import path from 'path';
 import { clothingRouter } from './routes/clothing';
 import { imagesRouter } from './routes/images';
+import { adminRouter } from './routes/admin';
 import { outfitsRouter } from './routes/outfits';
 import { stylistRouter } from './routes/stylist';
 import { wardrobeRouter } from './routes/wardrobe';
-import tripsRouter from './routes/trips';
-import { userRouter } from './routes/user';
 import { requireAuth } from './middleware/auth';
 import { requestLogger } from './middleware/request_logger';
 import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
@@ -31,13 +30,12 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api', apiRateLimiter);
+app.use('/api/admin', adminRouter);
 app.use('/api/wardrobe', requireAuth, wardrobeRouter);
 app.use('/api/clothing', requireAuth, clothingRouter);
 app.use('/api/images', requireAuth, imagesRouter);
 app.use('/api/outfits', requireAuth, outfitsRouter);
-app.use('/api/trips', requireAuth, tripsRouter);
 app.use('/api/stylist', stylistRateLimiter, requireAuth, stylistRouter);
-app.use('/api/user', requireAuth, userRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {

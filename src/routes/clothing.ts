@@ -6,14 +6,13 @@ import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import axios from 'axios';
 import { detectGarmentRegions, tagClothingItem } from '../services/claude_service';
-import { uploadBufferToSupabase, uploadLocalFileToSupabase } from '../lib/supabase';
 
 export const clothingRouter = Router();
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
 const SPLITS_DIR = path.join(UPLOADS_DIR, 'splits');
-const PERMANENT_DIR = path.join(UPLOADS_DIR, 'permanent');
+const GENERATED_DIR = path.join(UPLOADS_DIR, 'generated');
 const MAX_SPLIT_REGIONS = 4;
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -21,8 +20,8 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 if (!fs.existsSync(SPLITS_DIR)) {
   fs.mkdirSync(SPLITS_DIR, { recursive: true });
 }
-if (!fs.existsSync(PERMANENT_DIR)) {
-  fs.mkdirSync(PERMANENT_DIR, { recursive: true });
+if (!fs.existsSync(GENERATED_DIR)) {
+  fs.mkdirSync(GENERATED_DIR, { recursive: true });
 }
 
 function imageModelCandidates(): string[] {
@@ -91,7 +90,7 @@ async function generateFullGarmentImage(
   const categoryHint = hints?.category ? ` Garment type: ${hints.category}.` : '';
   const nameHint = hints?.name ? ` Item name: ${hints.name}.` : '';
 
-  const prompt = `Given the reference garment image, generate a complete full-length product-style image of the same clothing item.${categoryHint}${nameHint}${colorHint}${styleHint} Keep the exact garment design and texture. The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. No mannequin, no person, no text, no watermark.`;
+  const prompt = `Given the reference garment image, generate a complete full-length product-style image of the same clothing item.${categoryHint}${nameHint}${colorHint}${styleHint} Keep the exact garment design and texture. Show the full clothing piece centered, uncropped, neutral studio background, no mannequin, no person, no text, no watermark.`;
 
   for (const model of models) {
     try {
@@ -134,16 +133,9 @@ async function generateFullGarmentImage(
       }
 
       const generatedFilename = `${randomUUID()}_full.png`;
-      try {
-        const publicUrl = await uploadBufferToSupabase(
-          Buffer.from(generatedBase64, 'base64'),
-          generatedFilename
-        );
-        return publicUrl;
-      } catch (uploadError) {
-        console.error('Failed to upload enhanced image to Supabase:', uploadError);
-        return null;
-      }
+      const generatedPath = path.join(GENERATED_DIR, generatedFilename);
+      fs.writeFileSync(generatedPath, Buffer.from(generatedBase64, 'base64'));
+      return `/uploads/generated/${generatedFilename}`;
     } catch (error) {
       if (!axios.isAxiosError(error)) {
         continue;
@@ -227,16 +219,8 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
       name: tags.name,
     });
 
-    // Build a publicly accessible imageUrl
-    let imageUrl = enhancedImageUrl;
-    if (!imageUrl) {
-      try {
-        imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
-      } catch (uploadErr) {
-        console.error('Failed to upload raw image to Supabase', uploadErr);
-        imageUrl = `/uploads/${req.file.filename}`;
-      }
-    }
+    // Build a publicly accessible imageUrl relative to the server origin
+    const imageUrl = enhancedImageUrl ?? `/uploads/${req.file.filename}`;
 
     return res.json({ ...tags, imageUrl });
   } catch (err) {
@@ -279,21 +263,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
 
     if (selectedRegions.length <= 1) {
       const singleTags = await tagClothingItem(uploadedPath);
-      const enhancedImageUrl = await generateFullGarmentImage(uploadedPath, {
-        category: singleTags.category,
-        colors: singleTags.colors,
-        style: singleTags.style,
-        name: singleTags.name,
-      });
-      let imageUrl = enhancedImageUrl;
-      if (!imageUrl) {
-        try {
-          imageUrl = await uploadLocalFileToSupabase(uploadedPath, uploadedFilename);
-        } catch (uploadErr) {
-          console.error('Failed to upload single split raw image to Supabase', uploadErr);
-          imageUrl = `/uploads/${uploadedFilename}`;
-        }
-      }
+      const imageUrl = `/uploads/${uploadedFilename}`;
       return res.json({
         items: [{
           ...singleTags,
@@ -323,16 +293,11 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         .toFile(outputPath);
 
       const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
-      let imageUrl = `/uploads/splits/${filename}`;
-      try {
-        imageUrl = await uploadLocalFileToSupabase(outputPath, filename);
-      } catch (uploadErr) {
-        console.error('Failed to upload split crop to Supabase', uploadErr);
-      }
-
       return {
         ...tags,
-        imageUrl,
+        // Split preview should return the crop immediately. Generating a polished
+        // product image for every detected item can exceed mobile/proxy limits.
+        imageUrl: `/uploads/splits/${filename}`,
         source: 'split',
         box: {
           x: region.x,

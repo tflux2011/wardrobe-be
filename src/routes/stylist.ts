@@ -10,12 +10,11 @@ function getGeminiModel() {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
-  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-flash-latest' });
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
 }
 
 const chatSchema = z.object({
   message: z.string().min(1).max(2000),
-  contextText: z.string().optional(),
   history: z
     .array(
       z.object({
@@ -56,7 +55,7 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { message, history, contextText } = parsed.data;
+  const { message, history } = parsed.data;
 
   try {
     const dbItems = await prisma.clothingItem.findMany({
@@ -74,14 +73,10 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       wearCount: item.wearCount,
     }));
 
-    let wardrobeStr =
+    const wardrobeStr =
       wardrobeContext && wardrobeContext.length > 0
         ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
         : "\n\nThe user has not added any wardrobe items yet.";
-
-    if (contextText) {
-      wardrobeStr += `\n\nADDITIONAL CONTEXT (e.g. Current Outfit or Item being viewed):\n${contextText}\nWhen answering the user, refer to this context if relevant.`;
-    }
 
     const model = getGeminiModel();
 
@@ -107,120 +102,5 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
     }
 
     return res.status(500).json({ error: 'Failed to get stylist response' });
-  }
-});
-
-// POST /api/stylist/challenge
-stylistRouter.post('/challenge', async (req: Request, res: Response) => {
-  const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-
-  const { itemId } = req.body;
-  if (!itemId) {
-    return res.status(400).json({ error: 'itemId is required' });
-  }
-
-  try {
-    const dbItems = await prisma.clothingItem.findMany({
-      where: { userId: uid },
-    });
-
-    const targetItem = dbItems.find(i => i.id === itemId);
-    if (!targetItem) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-
-    const { generateStylingChallenge } = await import('../services/claude_service');
-
-    const wardrobeContext = dbItems.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      colors: JSON.parse(item.colors),
-      style: item.style,
-      occasions: JSON.parse(item.occasions),
-      seasons: JSON.parse(item.seasons),
-      tags: JSON.parse(item.tags),
-      lastWornAt: item.lastWornAt?.toISOString(),
-    }));
-
-    const suggestions = await generateStylingChallenge({
-      targetItem: {
-        id: targetItem.id,
-        name: targetItem.name,
-        category: targetItem.category,
-        colors: JSON.parse(targetItem.colors),
-        style: targetItem.style,
-        occasions: JSON.parse(targetItem.occasions),
-        seasons: JSON.parse(targetItem.seasons),
-        tags: JSON.parse(targetItem.tags),
-      },
-      wardrobe: wardrobeContext,
-    });
-
-    return res.json({ suggestions });
-  } catch (err) {
-    console.error('[stylist/challenge]', err);
-    return res.status(500).json({ error: 'Failed to generate challenge' });
-  }
-});
-
-// GET /api/stylist/gaps
-stylistRouter.get('/gaps', async (req: Request, res: Response) => {
-  const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
-
-  try {
-    const dbItems = await prisma.clothingItem.findMany({
-      where: { userId: uid },
-    });
-
-    if (dbItems.length === 0) {
-      return res.json({ gaps: [] });
-    }
-
-    const wardrobeContext = dbItems.map((item: any) => ({
-      name: item.name,
-      category: item.category,
-      colors: JSON.parse(item.colors),
-      style: item.style,
-      occasions: JSON.parse(item.occasions),
-    }));
-
-    const model = getGeminiModel();
-
-    const systemPrompt = `You are an expert personal stylist. Analyze the user's wardrobe and identify exactly 3 essential missing items (Wardrobe Gaps) that would unlock many new outfit combinations based on what they already own.
-For each gap, provide:
-1. "missingItem": The name of the item (e.g., "Neutral Trousers")
-2. "reason": A short explanation of why they need it and what it pairs with.
-3. "searchQuery": A precise search query for Google Shopping (e.g., "Mens Neutral Chino Trousers").
-
-Return the response strictly as a JSON array of objects with keys: missingItem, reason, searchQuery.`;
-
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `Wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}` }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-      },
-      systemInstruction: systemPrompt,
-    });
-
-    const responseText = result.response.text();
-    let gaps = [];
-    try {
-      gaps = JSON.parse(responseText);
-    } catch (e) {
-      console.error('Failed to parse gaps JSON', e);
-    }
-
-    return res.json({ gaps });
-  } catch (err) {
-    console.error('[stylist/gaps]', err);
-    return res.status(500).json({ error: 'Failed to analyze wardrobe gaps' });
   }
 });
