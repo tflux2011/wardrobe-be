@@ -38,7 +38,7 @@ router.post('/plan', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { destination, startDate, endDate, purpose } = req.body;
+    const { destination, startDate, endDate, purpose, styleProfile } = req.body;
     
     if (!destination || !startDate || !endDate || !purpose) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -52,9 +52,6 @@ router.post('/plan', async (req, res) => {
     if (wardrobe.length === 0) {
       return res.status(400).json({ error: 'Your closet is empty. Add clothes first.' });
     }
-
-    // Fetch user style profile if needed (assuming empty string if none)
-    const styleProfile = undefined; // Add this if you persist style profile in DB
 
     const plan = await generateTripPlan({
       destination,

@@ -468,27 +468,48 @@ export async function generateTripPlan(params: {
   styleProfile?: any;
 }): Promise<TripPlan> {
   const model = getGeminiModel();
-  const { destination, startDate, endDate, purpose, wardrobe } = params;
+  const { destination, startDate, endDate, purpose, wardrobe, styleProfile } = params;
+
+  const styleContext = styleProfile
+    ? `The user's personal style profile:
+- Skin Tone / Undertone: ${styleProfile.skinTone ?? 'unknown'} (${styleProfile.undertone ?? 'unknown'} undertone)
+- Contrast Level: ${styleProfile.contrast ?? 'unknown'}
+- Dressing Preference / Gender Expression: ${styleProfile.gender ?? 'unknown'}
+- Style Aesthetic: Sophisticated, harmonized color coordination, structured and high-quality styling.`
+    : '';
 
   const result = await model.generateContent(
-    `You are a personal stylist planning a trip to ${destination} from ${startDate} to ${endDate} for ${purpose}.
-    
-Wardrobe: ${JSON.stringify(wardrobe, null, 2)}
+    `You are an elite high-end celebrity personal stylist and luxury wardrobe consultant. You are designing a highly sophisticated, stylish, and curated capsule wardrobe trip plan to ${destination} from ${startDate} to ${endDate} for a ${purpose} trip.
 
-Return ONLY a JSON object with this shape:
+${styleContext}
+
+User's Existing Wardrobe Items:
+${JSON.stringify(wardrobe, null, 2)}
+
+Your styling instructions are:
+1. **Sophistication & Cohesion**: Do not recommend generic or basic outfits. Design highly cohesive, fashionable, and aesthetic looks that match the local climate and fashion culture of ${destination} for the purpose of a ${purpose} trip.
+2. **Personalized Color Theory**: Utilize the user's style profile (especially skin tone, undertone, and contrast level) to choose flattering garment colors from their wardrobe. Match warm undertones with earth/warm tones, cool undertones with cool/jewel tones, and contrast level for bold vs. monochromatic coordination.
+3. **Daily Outfits**: For each day of the trip, curate a complete stylish daily outfit using items from the wardrobe. Ensure the color coordination and silhouette are highly elegant. Provide a clear, stylish, and professional 'rationale' explaining the styling synergy, color theory, and why the look is perfect for the destination's vibe.
+4. **Suggested Additions**: Recommend 1 to 3 items that are NOT in their wardrobe but are absolute must-haves to elevate their looks and complete their travel wardrobe. Provide highly specific styling advice for each suggestion, describing exactly how it coordinates with their existing wardrobe items to create high-end, elegant outfits.
+
+Return ONLY a JSON object with this exact shape:
 {
   "packingList": ["id1", "id2"],
   "dailyOutfits": [
     {
       "day": 1,
-      "outfit": { "name": "Day 1 Outfit", "itemIds": ["id1"], "rationale": "Perfect for travel" }
+      "outfit": {
+        "name": "E.g., Casual Parisian Chic",
+        "itemIds": ["id1"],
+        "rationale": "Styling rationale explaining the color harmony and silhouette synergy for the day's events."
+      }
     }
   ],
   "suggestedAdditions": [
     {
-      "name": "E.g., White Linen Trousers",
-      "category": "bottom",
-      "reason": "Great addition for warm evenings in Rome and coordinates with your denim jacket."
+      "name": "E.g., Beige Linen Blazer",
+      "category": "outerwear",
+      "reason": "An elegant layering piece that adds structured sophistication. Elevates your daily denim look and matches perfectly with your white shirt."
     }
   ]
 }`
