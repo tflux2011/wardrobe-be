@@ -465,10 +465,11 @@ export async function generateTripPlan(params: {
   endDate: string;
   purpose: string;
   wardrobe: any[];
+  homeCity?: string;
   styleProfile?: any;
 }): Promise<TripPlan> {
   const model = getGeminiModel();
-  const { destination, startDate, endDate, purpose, wardrobe, styleProfile } = params;
+  const { destination, startDate, endDate, purpose, wardrobe, homeCity, styleProfile } = params;
 
   const styleContext = styleProfile
     ? `The user's personal style profile:
@@ -478,8 +479,16 @@ export async function generateTripPlan(params: {
 - Style Aesthetic: Sophisticated, harmonized color coordination, structured and high-quality styling.`
     : '';
 
+  const homeCityContext = homeCity
+    ? `The user is traveling from their home city of ${homeCity} to the destination city of ${destination}.
+Because they are traveling between these two cities, they will encounter the weather in both locations on their departure and return travel days.
+You MUST pack and suggest items (e.g., versatile layers, comfortable travel transit outfits) that cater for the climates in BOTH ${homeCity} and ${destination}, ensuring comfortable transit and seamless styling across both cities.`
+    : '';
+
   const result = await model.generateContent(
     `You are an elite high-end celebrity personal stylist and luxury wardrobe consultant. You are designing a highly sophisticated, stylish, and curated capsule wardrobe trip plan to ${destination} from ${startDate} to ${endDate} for a ${purpose} trip.
+
+${homeCityContext}
 
 ${styleContext}
 
@@ -585,3 +594,67 @@ Return ONLY a JSON array of the top 3 matches:
 
   return parseJsonResponse<StoreItemMatch[]>(text);
 }
+
+/**
+ * Generate 3 outfits that prominently feature a specific, neglected clothing item.
+ */
+export async function generateStylingChallenge(params: {
+  targetItem: {
+    id: string;
+    name: string;
+    category: string;
+    colors: string[];
+    style: string;
+    occasions: string[];
+    seasons: string[];
+    tags: string[];
+  };
+  wardrobe: any[];
+  weather?: { temp: number; condition: string };
+}): Promise<OutfitSuggestion[]> {
+  const model = getGeminiModel();
+  const { targetItem, wardrobe, weather } = params;
+
+  const wardrobeSummary = wardrobe.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    colors: item.colors,
+    style: item.style,
+  }));
+
+  const weatherContext = weather
+    ? `Current Weather: ${weather.temp}°C, ${weather.condition}`
+    : `Assume comfortable, temperate weather.`;
+
+  const result = await model.generateContent(
+    `You are an expert personal stylist. The user wants to wear a neglected item from their closet:
+Target Item: ${targetItem.name} (Category: ${targetItem.category}, Colors: ${targetItem.colors.join(', ')})
+
+${weatherContext}
+Available Wardrobe: ${JSON.stringify(wardrobeSummary, null, 2)}
+
+Rules:
+1. Generate exactly 3 fresh outfit ideas.
+2. EVERY outfit MUST include the Target Item (id: "${targetItem.id}").
+3. Include at least a top and bottom (or dress) to make a complete outfit.
+4. Only use items from the available wardrobe.
+
+Return ONLY a JSON array of 3 outfits matching this schema:
+[
+  {
+    "name": "Short, catchy outfit name",
+    "itemIds": ["id1", "id2", "${targetItem.id}"],
+    "rationale": "Why this combination makes the target item look great."
+  }
+]`
+  );
+
+  const text = result.response.text();
+  if (!text) {
+    throw new Error('Gemini returned an empty response');
+  }
+
+  return parseJsonResponse<OutfitSuggestion[]>(text);
+}
+

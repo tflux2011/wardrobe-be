@@ -19,6 +19,7 @@ const suggestSchema = z.object({
       gender: z.string().min(1).max(32),
     })
     .optional(),
+  itemIds: z.array(z.string()).optional(),
 });
 
 // POST /api/outfits/suggest
@@ -31,11 +32,16 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { occasion, weather, styleProfile } = parsed.data;
+  const { occasion, weather, styleProfile, itemIds } = parsed.data;
 
   try {
+    const queryConditions: any = { userId: uid };
+    if (itemIds && itemIds.length > 0) {
+      queryConditions.id = { in: itemIds };
+    }
+
     const dbItems = await prisma.clothingItem.findMany({
-      where: { userId: uid },
+      where: queryConditions,
     });
 
     if (dbItems.length === 0) {

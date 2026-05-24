@@ -38,7 +38,7 @@ router.post('/plan', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { destination, startDate, endDate, purpose, styleProfile } = req.body;
+    const { destination, startDate, endDate, purpose, homeCity, styleProfile } = req.body;
     
     if (!destination || !startDate || !endDate || !purpose) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -58,6 +58,7 @@ router.post('/plan', async (req, res) => {
       startDate,
       endDate,
       purpose,
+      homeCity,
       wardrobe: wardrobe.map(i => ({
         id: i.id,
         name: i.name,

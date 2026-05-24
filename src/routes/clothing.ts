@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import axios from 'axios';
 import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches } from '../services/claude_service';
 import { prisma } from '../lib/prisma';
+import { uploadBufferToSupabase, uploadLocalFileToSupabase } from '../lib/supabase';
 
 export const clothingRouter = Router();
 
@@ -134,9 +135,16 @@ async function generateFullGarmentImage(
       }
 
       const generatedFilename = `${randomUUID()}_full.png`;
-      const generatedPath = path.join(GENERATED_DIR, generatedFilename);
-      fs.writeFileSync(generatedPath, Buffer.from(generatedBase64, 'base64'));
-      return `/uploads/generated/${generatedFilename}`;
+      try {
+        const publicUrl = await uploadBufferToSupabase(
+          Buffer.from(generatedBase64, 'base64'),
+          generatedFilename
+        );
+        return publicUrl;
+      } catch (uploadError) {
+        console.error('Failed to upload enhanced image to Supabase:', uploadError);
+        return null;
+      }
     } catch (error) {
       if (!axios.isAxiosError(error)) {
         continue;
@@ -220,8 +228,19 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
       name: tags.name,
     });
 
-    // Build a publicly accessible imageUrl relative to the server origin
-    const imageUrl = enhancedImageUrl ?? `/uploads/${req.file.filename}`;
+    // Build a publicly accessible imageUrl
+    let imageUrl = enhancedImageUrl;
+    if (!imageUrl) {
+      try {
+        imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
+        fs.unlink(req.file.path, () => undefined);
+      } catch (uploadErr) {
+        console.error('Failed to upload raw image to Supabase', uploadErr);
+        imageUrl = `/uploads/${req.file.filename}`;
+      }
+    } else {
+      fs.unlink(req.file.path, () => undefined);
+    }
 
     return res.json({ ...tags, imageUrl });
   } catch (err) {
@@ -264,7 +283,24 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
 
     if (selectedRegions.length <= 1) {
       const singleTags = await tagClothingItem(uploadedPath);
-      const imageUrl = `/uploads/${uploadedFilename}`;
+      const enhancedImageUrl = await generateFullGarmentImage(uploadedPath, {
+        category: singleTags.category,
+        colors: singleTags.colors,
+        style: singleTags.style,
+        name: singleTags.name,
+      });
+      let imageUrl = enhancedImageUrl;
+      if (!imageUrl) {
+        try {
+          imageUrl = await uploadLocalFileToSupabase(uploadedPath, uploadedFilename);
+          fs.unlink(uploadedPath, () => undefined);
+        } catch (uploadErr) {
+          console.error('Failed to upload single split raw image to Supabase', uploadErr);
+          imageUrl = `/uploads/${uploadedFilename}`;
+        }
+      } else {
+        fs.unlink(uploadedPath, () => undefined);
+      }
       return res.json({
         items: [{
           ...singleTags,
@@ -294,11 +330,17 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         .toFile(outputPath);
 
       const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
+      let imageUrl = `/uploads/splits/${filename}`;
+      try {
+        imageUrl = await uploadLocalFileToSupabase(outputPath, filename);
+        fs.unlink(outputPath, () => undefined);
+      } catch (uploadErr) {
+        console.error('Failed to upload split crop to Supabase', uploadErr);
+      }
+
       return {
         ...tags,
-        // Split preview should return the crop immediately. Generating a polished
-        // product image for every detected item can exceed mobile/proxy limits.
-        imageUrl: `/uploads/splits/${filename}`,
+        imageUrl,
         source: 'split',
         box: {
           x: region.x,

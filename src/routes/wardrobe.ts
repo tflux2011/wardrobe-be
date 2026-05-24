@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const wardrobeRouter = Router();
 
@@ -128,3 +129,69 @@ wardrobeRouter.delete('/:id', async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Failed to delete item' });
   }
 });
+
+// GET /api/wardrobe/gaps
+wardrobeRouter.get('/gaps', async (req: Request, res: Response) => {
+  const uid = req.user?.uid;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
+  }
+
+  try {
+    const dbItems = await prisma.clothingItem.findMany({
+      where: { userId: uid },
+    });
+
+    if (dbItems.length === 0) {
+      return res.json([]);
+    }
+
+    const wardrobeContext = dbItems.map((item: any) => ({
+      name: item.name,
+      category: item.category,
+      colors: JSON.parse(item.colors),
+      style: item.style,
+      occasions: JSON.parse(item.occasions),
+    }));
+
+    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    const systemPrompt = `You are an expert personal stylist. Analyze the user's wardrobe and identify exactly 3 essential missing items (Wardrobe Gaps) that would unlock many new outfit combinations based on what they already own.
+For each gap, provide:
+1. "missingItem": The name of the item (e.g., "Neutral Trousers")
+2. "reason": A short explanation of why they need it and what it pairs with.
+3. "searchQuery": A precise search query for Google Shopping (e.g., "Mens Neutral Chino Trousers").
+
+Return the response strictly as a JSON array of objects with keys: missingItem, reason, searchQuery.`;
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `Wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}` }],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+      systemInstruction: systemPrompt,
+    });
+
+    const responseText = result.response.text();
+    let gaps = [];
+    try {
+      gaps = JSON.parse(responseText);
+    } catch (e) {
+      console.error('Failed to parse gaps JSON', e);
+    }
+
+    return res.json(gaps);
+  } catch (err) {
+    console.error('[wardrobe/gaps]', err);
+    return res.status(500).json({ error: 'Failed to analyze wardrobe gaps' });
+  }
+});
+
