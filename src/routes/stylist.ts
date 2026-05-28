@@ -22,7 +22,7 @@ const chatSchema = z.object({
         content: z.string().max(4000),
       }),
     )
-    .max(40) // cap history depth to control token spend
+    .max(12) // Cap history depth at 12 turns (6 full roundtrips) to slash token costs while retaining relevant context
     .default([]),
 });
 
@@ -63,20 +63,16 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       where: { userId: uid },
     });
 
-    const wardrobeContext = dbItems.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      colors: JSON.parse(item.colors),
-      style: item.style,
-      occasions: JSON.parse(item.occasions),
-      lastWornAt: item.lastWornAt?.toISOString(),
-      wearCount: item.wearCount,
-    }));
-
     const wardrobeStr =
-      wardrobeContext && wardrobeContext.length > 0
-        ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
+      dbItems && dbItems.length > 0
+        ? `\n\nUser's wardrobe:\n${dbItems
+            .map((item: any) => {
+              const colors = JSON.parse(item.colors).join(', ');
+              const occasions = JSON.parse(item.occasions).join(', ');
+              const lastWorn = item.lastWornAt ? item.lastWornAt.toISOString().split('T')[0] : 'never';
+              return `- [${item.id}] ${item.name} | category:${item.category} | colors:${colors} | style:${item.style} | occasions:${occasions} | wearCount:${item.wearCount} | lastWorn:${lastWorn}`;
+            })
+            .join('\n')}`
         : "\n\nThe user has not added any wardrobe items yet.";
 
     const apiKey = process.env.GEMINI_API_KEY;
