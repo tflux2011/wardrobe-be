@@ -43,6 +43,61 @@ adminRouter.post('/login', (req, res) => {
   }
 });
 
+adminRouter.get('/test-supabase', async (req, res) => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  const diagnostics = {
+    urlSet: !!supabaseUrl,
+    urlLength: supabaseUrl ? supabaseUrl.length : 0,
+    urlPreview: supabaseUrl ? `${supabaseUrl.substring(0, 15)}...${supabaseUrl.substring(supabaseUrl.length - 5)}` : 'none',
+    keySet: !!supabaseServiceKey,
+    keyLength: supabaseServiceKey ? supabaseServiceKey.length : 0,
+    keyPreview: supabaseServiceKey ? `${supabaseServiceKey.substring(0, 10)}...${supabaseServiceKey.substring(supabaseServiceKey.length - 5)}` : 'none',
+  };
+
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const dummyBuffer = Buffer.from('Supabase storage connection test');
+    const filename = `test_connection_${Date.now()}.txt`;
+    
+    const { data, error } = await supabase.storage
+      .from('wardrobe-images')
+      .upload(filename, dummyBuffer, {
+        contentType: 'text/plain',
+        upsert: true,
+      });
+
+    if (error) {
+      return res.json({
+        status: 'failed',
+        error: error.message,
+        diagnostics
+      });
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('wardrobe-images')
+      .getPublicUrl(data.path);
+
+    // Clean up the dummy file
+    await supabase.storage.from('wardrobe-images').remove([data.path]);
+
+    return res.json({
+      status: 'success',
+      publicUrl: publicUrlData.publicUrl,
+      diagnostics
+    });
+  } catch (err: any) {
+    return res.json({
+      status: 'error',
+      message: err.message,
+      stack: err.stack,
+      diagnostics
+    });
+  }
+});
+
 adminRouter.use(requireAdmin);
 
 adminRouter.get('/stats', async (req, res) => {
