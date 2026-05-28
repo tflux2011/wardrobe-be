@@ -234,9 +234,9 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
       try {
         imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
         fs.unlink(req.file.path, () => undefined);
-      } catch (uploadErr) {
+      } catch (uploadErr: any) {
         console.error('Failed to upload raw image to Supabase', uploadErr);
-        imageUrl = `/uploads/${req.file.filename}`;
+        throw new Error(`Failed to save image to Supabase: ${uploadErr.message}`);
       }
     } else {
       fs.unlink(req.file.path, () => undefined);
@@ -294,9 +294,9 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         try {
           imageUrl = await uploadLocalFileToSupabase(uploadedPath, uploadedFilename);
           fs.unlink(uploadedPath, () => undefined);
-        } catch (uploadErr) {
+        } catch (uploadErr: any) {
           console.error('Failed to upload single split raw image to Supabase', uploadErr);
-          imageUrl = `/uploads/${uploadedFilename}`;
+          throw new Error(`Failed to save split image to Supabase: ${uploadErr.message}`);
         }
       } else {
         fs.unlink(uploadedPath, () => undefined);
@@ -330,12 +330,13 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
         .toFile(outputPath);
 
       const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
-      let imageUrl = `/uploads/splits/${filename}`;
+      let imageUrl: string;
       try {
         imageUrl = await uploadLocalFileToSupabase(outputPath, filename);
         fs.unlink(outputPath, () => undefined);
-      } catch (uploadErr) {
+      } catch (uploadErr: any) {
         console.error('Failed to upload split crop to Supabase', uploadErr);
+        throw new Error(`Failed to save split crop to Supabase: ${uploadErr.message}`);
       }
 
       return {
@@ -425,8 +426,15 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
       });
     }
 
-    // Publicly accessible URL relative to origin
-    const imageUrl = `/uploads/${req.file.filename}`;
+    // Upload retail garment image to Supabase Storage
+    let imageUrl: string;
+    try {
+      imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
+      fs.unlink(req.file.path, () => undefined);
+    } catch (uploadErr: any) {
+      console.error('Failed to upload retail garment to Supabase', uploadErr);
+      throw new Error(`Failed to upload retail image to Supabase: ${uploadErr.message}`);
+    }
 
     return res.json({
       storeItem: {
