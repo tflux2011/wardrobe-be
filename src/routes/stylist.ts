@@ -80,13 +80,40 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
 
     const model = getGeminiModel();
 
+    // Map history to 'user' and 'model' roles
+    let mappedHistory = history.map((h) => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.content }],
+    }));
+
+    // Ensure history starts with a 'user' message as strictly required by Gemini
+    const firstUserIdx = mappedHistory.findIndex((h) => h.role === 'user');
+    if (firstUserIdx === -1) {
+      mappedHistory = [];
+    } else {
+      mappedHistory = mappedHistory.slice(firstUserIdx);
+    }
+
+    // Ensure history alternates strictly (user -> model -> user -> model...)
+    const alternatingHistory: typeof mappedHistory = [];
+    let expectedRole = 'user';
+    for (const msg of mappedHistory) {
+      if (msg.role === expectedRole) {
+        alternatingHistory.push(msg);
+        expectedRole = expectedRole === 'user' ? 'model' : 'user';
+      }
+    }
+
+    // Ensure history ends with a 'model' message so that the subsequent user query sent
+    // via sendMessage() alternates perfectly as a 'user' message.
+    if (alternatingHistory.length > 0 && alternatingHistory[alternatingHistory.length - 1].role === 'user') {
+      alternatingHistory.pop();
+    }
+
     // Gemini multi-turn: build history as Content[] and send the latest message
     const chat = model.startChat({
       systemInstruction: STYLIST_SYSTEM_PROMPT + wardrobeStr,
-      history: history.map((h) => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.content }],
-      })),
+      history: alternatingHistory,
     });
 
     const chatResult = await chat.sendMessage(message);
