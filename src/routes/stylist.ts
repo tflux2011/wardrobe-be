@@ -78,7 +78,14 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
         ? `\n\nUser's wardrobe:\n${JSON.stringify(wardrobeContext, null, 2)}`
         : "\n\nThe user has not added any wardrobe items yet.";
 
-    const model = getGeminiModel();
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured');
+    }
+    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      systemInstruction: STYLIST_SYSTEM_PROMPT + wardrobeStr,
+    });
 
     // Map history to 'user' and 'model' roles
     let mappedHistory = history.map((h) => ({
@@ -112,7 +119,6 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
 
     // Gemini multi-turn: build history as Content[] and send the latest message
     const chat = model.startChat({
-      systemInstruction: STYLIST_SYSTEM_PROMPT + wardrobeStr,
       history: alternatingHistory,
     });
 
