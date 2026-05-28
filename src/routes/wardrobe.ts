@@ -2,14 +2,52 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { EmailService } from '../services/email_service';
 
 export const wardrobeRouter = Router();
 
 // Ensure the user exists in the DB (since Firebase handles auth, we lazily create User records)
-async function ensureUser(uid: string) {
+async function ensureUser(uid: string, email?: string | null) {
   const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user) {
-    await prisma.user.create({ data: { id: uid } });
+    await prisma.user.create({
+      data: {
+        id: uid,
+        email: email || null
+      }
+    });
+
+    if (email) {
+      try {
+        const welcomeTemplate = await prisma.emailTemplate.findUnique({
+          where: { id: 'welcome' }
+        });
+        
+        const subject = welcomeTemplate?.subject || 'Welcome to Clad Atelier // Closet Calibration Initiated';
+        const bodyTemplate = welcomeTemplate?.body || EmailService.getDefaultTemplates().welcome.body;
+        
+        const renderedHtml = EmailService.interpolate(bodyTemplate, {
+          userName: email.split('@')[0],
+        });
+
+        EmailService.sendEmail({
+          to: email,
+          subject,
+          html: renderedHtml
+        }).then(res => {
+          console.log(`[Onboarding Welcome Email] Sent to ${email} (Mode: ${res.mode}, ID: ${res.id})`);
+        }).catch(err => {
+          console.error(`[Onboarding Welcome Email] Failed to send to ${email}:`, err);
+        });
+      } catch (err) {
+        console.error('[Onboarding Welcome Email] Error rendering welcome email:', err);
+      }
+    }
+  } else if (email && user.email !== email) {
+    await prisma.user.update({
+      where: { id: uid },
+      data: { email }
+    });
   }
 }
 
@@ -19,7 +57,7 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    await ensureUser(uid);
+    await ensureUser(uid, req.user?.email);
     const dbItems = await prisma.clothingItem.findMany({
       where: { userId: uid },
       orderBy: { addedAt: 'desc' },
@@ -66,7 +104,7 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    await ensureUser(uid);
+    await ensureUser(uid, req.user?.email);
     const data = parsed.data;
     
     const newItem = await prisma.clothingItem.create({

@@ -2,6 +2,7 @@ import express from 'express';
 import { prisma } from '../lib/prisma';
 import { ApiError } from '../utils/errors';
 import crypto from 'crypto';
+import { EmailService } from '../services/email_service';
 
 export const adminRouter = express.Router();
 
@@ -158,4 +159,168 @@ adminRouter.delete('/whitelist/:email', async (req, res) => {
   } catch (err) {
     throw new ApiError(404, 'Email not found in whitelist');
   }
+});
+
+// GET /api/admin/emails - Fetch all templates (with self-healing auto-seeding)
+adminRouter.get('/emails', async (req, res) => {
+  let templates = await prisma.emailTemplate.findMany({
+    orderBy: { id: 'asc' }
+  });
+
+  if (templates.length === 0) {
+    const defaults = EmailService.getDefaultTemplates();
+    const seeded = [];
+    for (const [id, t] of Object.entries(defaults)) {
+      const entry = await prisma.emailTemplate.create({
+        data: {
+          id,
+          subject: t.subject,
+          body: t.body,
+        }
+      });
+      seeded.push(entry);
+    }
+    return res.json(seeded);
+  }
+
+  res.json(templates);
+});
+
+// PUT /api/admin/emails/:id - Update dynamic template
+adminRouter.put('/emails/:id', async (req, res) => {
+  const { id } = req.params;
+  const { subject, body } = req.body;
+
+  if (!subject || typeof subject !== 'string' || !body || typeof body !== 'string') {
+    throw new ApiError(400, 'Subject and body strings are required');
+  }
+
+  const updated = await prisma.emailTemplate.update({
+    where: { id },
+    data: { subject, body }
+  });
+
+  res.json(updated);
+});
+
+// POST /api/admin/emails/:id/test - Send test preview email
+adminRouter.post('/emails/:id/test', async (req, res) => {
+  const { id } = req.params;
+  const { testEmail } = req.body;
+
+  if (!testEmail || typeof testEmail !== 'string' || !testEmail.includes('@')) {
+    throw new ApiError(400, 'Valid test email address is required');
+  }
+
+  const template = await prisma.emailTemplate.findUnique({
+    where: { id }
+  });
+
+  if (!template) {
+    throw new ApiError(404, `Template with ID '${id}' not found`);
+  }
+
+  // Render template using realistic mock details
+  let renderedHtml = template.body;
+  if (id === 'welcome') {
+    renderedHtml = EmailService.interpolate(template.body, {
+      userName: 'Alexander Patron',
+    });
+  } else if (id === 'trip_digest') {
+    renderedHtml = EmailService.interpolate(template.body, {
+      destination: 'Paris, France',
+      packingListHtml: `
+        <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+          <thead>
+            <tr>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Garment Name</th>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Category</th>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Style</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Camel Wool Double-Breasted Blazer</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Outerwear</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Smart</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Belgian Linen Camp Collar Shirt</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Top</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Casual</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">White Tommy Hilfiger Sneaker</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Shoes</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Casual</td>
+            </tr>
+          </tbody>
+        </table>
+      `,
+      itineraryHtml: `
+        <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+          <thead>
+            <tr>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Day / Date</th>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Curated Coordinate Blueprint</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Day 01 // May 28</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Beige quarter-zip polo shirt + Loose-fit denim jeans + Tommy Hilfiger sneakers</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Day 02 // May 29</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Sage green knit polo shirt + Olive green cargo pants + White Cole Haan sneakers</td>
+            </tr>
+          </tbody>
+        </table>
+      `,
+    });
+  } else if (id === 'neglected_digest') {
+    renderedHtml = EmailService.interpolate(template.body, {
+      neglectedItemsHtml: `
+        <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+          <thead>
+            <tr>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Garment Name</th>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Last Worn Date</th>
+              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Neglect Index</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Black Leather Chelsea Boots</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">2026-04-12</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; color:#D25C34; font-weight:bold;">45 DAYS UNWORN</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">Teal Polo Shirt with Contrast Trim</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">2026-04-20</td>
+              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; color:#D25C34; font-weight:bold;">37 DAYS UNWORN</td>
+            </tr>
+          </tbody>
+        </table>
+      `,
+    });
+  }
+
+  // Send the test dispatch
+  const result = await EmailService.sendEmail({
+    to: testEmail,
+    subject: `[TEST PREVIEW] ${template.subject}`,
+    html: renderedHtml,
+  });
+
+  res.json({
+    success: true,
+    message: result.mode === 'live' 
+      ? `Live preview successfully dispatched to ${testEmail}!`
+      : `Test email successfully simulated to ${testEmail}!`,
+    mode: result.mode,
+    receiptId: result.id,
+    subject: `[TEST PREVIEW] ${template.subject}`,
+    html: renderedHtml,
+  });
 });
