@@ -7,6 +7,40 @@ export const userRouter = Router();
 
 userRouter.use(requireAuth);
 
+// POST /api/user/profile
+// Creates or updates the user profile with full name and gender
+userRouter.post('/profile', async (req: Request, res: Response) => {
+  const uid = (req as any).user?.uid;
+  const email = (req as any).user?.email?.toLowerCase().trim();
+  const { fullName, gender } = req.body;
+
+  if (!uid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const user = await prisma.user.upsert({
+      where: { id: uid },
+      update: {
+        fullName: fullName || undefined,
+        gender: gender || undefined,
+        email: email || undefined,
+      },
+      create: {
+        id: uid,
+        email: email || null,
+        fullName: fullName || null,
+        gender: gender || null,
+      },
+    });
+
+    return res.json(user);
+  } catch (error) {
+    console.error('[user/profile]', error);
+    return res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
 // GET /api/user/status
 // Checks if the authenticated user's email is in the whitelist.
 userRouter.get('/status', async (req: Request, res: Response) => {

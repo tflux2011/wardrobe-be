@@ -49,14 +49,21 @@ app.get('/health', (_req, res) => {
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use(
   (
-    err: Error,
+    err: any,
     _req: express.Request,
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    console.error('[error]', err.message);
-    // Do not expose internal error details to clients
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[error]', err.stack || err.message);
+    
+    // Support custom ApiError (and standard status errors)
+    const statusCode = err.statusCode || err.status || 500;
+    const isClientError = statusCode >= 400 && statusCode < 500;
+    
+    res.status(statusCode).json({
+      error: isClientError ? err.message : 'Internal server error',
+      details: err.details || undefined
+    });
   },
 );
 

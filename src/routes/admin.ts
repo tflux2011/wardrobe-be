@@ -117,6 +117,27 @@ adminRouter.get('/stats', async (req, res) => {
   });
 });
 
+adminRouter.get('/users', async (req, res) => {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      email: true,
+      fullName: true,
+      gender: true,
+      createdAt: true,
+      _count: {
+        select: {
+          clothingItems: true,
+          outfits: true,
+          trips: true
+        }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+  res.json(users);
+});
+
 adminRouter.get('/whitelist', async (req, res) => {
   const emails = await prisma.whitelistedEmail.findMany({
     orderBy: { addedAt: 'desc' }
@@ -307,20 +328,30 @@ adminRouter.post('/emails/:id/test', async (req, res) => {
   }
 
   // Send the test dispatch
-  const result = await EmailService.sendEmail({
-    to: testEmail,
-    subject: `[TEST PREVIEW] ${template.subject}`,
-    html: renderedHtml,
-  });
+  try {
+    const result = await EmailService.sendEmail({
+      to: testEmail,
+      subject: `[TEST PREVIEW] ${template.subject}`,
+      html: renderedHtml,
+    });
 
-  res.json({
-    success: true,
-    message: result.mode === 'live' 
-      ? `Live preview successfully dispatched to ${testEmail}!`
-      : `Test email successfully simulated to ${testEmail}!`,
-    mode: result.mode,
-    receiptId: result.id,
-    subject: `[TEST PREVIEW] ${template.subject}`,
-    html: renderedHtml,
-  });
+    res.json({
+      success: true,
+      message: result.mode === 'live' 
+        ? `Live preview successfully dispatched to ${testEmail}!`
+        : `Test email successfully simulated to ${testEmail}!`,
+      mode: result.mode,
+      receiptId: result.id,
+      subject: `[TEST PREVIEW] ${template.subject}`,
+      html: renderedHtml,
+    });
+  } catch (err: any) {
+    console.error('[adminRouter] test email dispatch failed:', err);
+    res.status(400).json({
+      success: false,
+      error: {
+        message: err.response?.data?.message || err.message || 'Failed to dispatch live email. Please check your Resend configuration and sender domain.'
+      }
+    });
+  }
 });
