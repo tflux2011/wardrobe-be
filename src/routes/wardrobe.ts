@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { EmailService } from '../services/email_service';
+import { enhancedImageCache } from './clothing';
 
 export const wardrobeRouter = Router();
 
@@ -106,6 +107,15 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
   try {
     await ensureUser(uid, req.user?.email);
     const data = parsed.data;
+
+    // Check if the background generative AI has already completed
+    // and swapped out the raw image URL for the enhanced one.
+    let imageUrl = data.imageUrl;
+    const cachedEnhancedUrl = enhancedImageCache.get(data.imageUrl);
+    if (cachedEnhancedUrl) {
+      imageUrl = cachedEnhancedUrl;
+      enhancedImageCache.delete(data.imageUrl); // clean up memory mapping
+    }
     
     const newItem = await prisma.clothingItem.create({
       data: {
@@ -118,7 +128,7 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
         occasions: JSON.stringify(data.occasions),
         seasons: JSON.stringify(data.seasons),
         tags: JSON.stringify(data.tags),
-        imageUrl: data.imageUrl,
+        imageUrl: imageUrl,
         localImagePath: data.localImagePath,
         price: data.price,
       },

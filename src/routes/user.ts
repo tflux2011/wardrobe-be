@@ -184,6 +184,37 @@ userRouter.post('/profile', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/user/profile
+// Fetches the user profile details including full name and gender
+userRouter.get('/profile', async (req: Request, res: Response) => {
+  const uid = (req as any).user?.uid;
+
+  if (!uid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: uid },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        gender: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    return res.json(user);
+  } catch (error) {
+    console.error('[user/get-profile]', error);
+    return res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
 // GET /api/user/status
 // Checks if the authenticated user's email is in the whitelist.
 userRouter.get('/status', async (req: Request, res: Response) => {

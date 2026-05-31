@@ -11,6 +11,22 @@ import { uploadBufferToSupabase, uploadLocalFileToSupabase } from '../lib/supaba
 
 export const clothingRouter = Router();
 
+// Cache raw image URLs to their background-enhanced versions
+export const enhancedImageCache = new Map<string, string>();
+
+async function resizeImageInPlace(filePath: string, maxWidth = 1024, maxHeight = 1024) {
+  try {
+    const tempPath = `${filePath}_temp`;
+    await sharp(filePath)
+      .resize({ width: maxWidth, height: maxHeight, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toFile(tempPath);
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    console.error('Failed to resize image in-place:', err);
+  }
+}
+
 // Ensure uploads directory exists
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
 const SPLITS_DIR = path.join(UPLOADS_DIR, 'splits');
@@ -219,30 +235,58 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
   }
 
   try {
+    // 1. Perform in-place image downscaling and compression immediately
+    await resizeImageInPlace(req.file.path);
+
+    // 2. Extract clothing tags from the lightweight resized image (~2 seconds)
     const tags = await tagClothingItem(req.file.path);
 
-    const enhancedImageUrl = await generateFullGarmentImage(req.file.path, {
-      category: tags.category,
-      colors: tags.colors,
-      style: tags.style,
-      name: tags.name,
-    });
-
-    // Build a publicly accessible imageUrl
-    let imageUrl = enhancedImageUrl;
-    if (!imageUrl) {
-      try {
-        imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
-        fs.unlink(req.file.path, () => undefined);
-      } catch (uploadErr: any) {
-        console.error('Failed to upload raw image to Supabase', uploadErr);
-        throw new Error(`Failed to save image to Supabase: ${uploadErr.message}`);
-      }
-    } else {
-      fs.unlink(req.file.path, () => undefined);
+    // 3. Upload the resized raw image to Supabase immediately
+    let rawImageUrl: string;
+    try {
+      rawImageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
+    } catch (uploadErr: any) {
+      console.error('Failed to upload raw resized image to Supabase', uploadErr);
+      throw new Error(`Failed to save image to Supabase: ${uploadErr.message}`);
     }
 
-    return res.json({ ...tags, imageUrl });
+    // 4. Return the extracted tags and rawImageUrl to the client immediately (UX: fast response!)
+    res.json({ ...tags, imageUrl: rawImageUrl });
+
+    // 5. Trigger generative catalog-style AI enhancement in the background
+    const uploadedFilePath = req.file.path;
+    const category = tags.category;
+    const colors = tags.colors;
+    const style = tags.style;
+    const name = tags.name;
+
+    (async () => {
+      try {
+        const enhancedImageUrl = await generateFullGarmentImage(uploadedFilePath, {
+          category,
+          colors,
+          style,
+          name,
+        });
+
+        if (enhancedImageUrl) {
+          // Cache the mapping so future saves can swap the raw URL for the enhanced URL
+          enhancedImageCache.set(rawImageUrl, enhancedImageUrl);
+
+          // Update any database records matching rawImageUrl that have already been saved
+          await prisma.clothingItem.updateMany({
+            where: { imageUrl: rawImageUrl },
+            data: { imageUrl: enhancedImageUrl },
+          });
+        }
+      } catch (backgroundErr) {
+        console.error('Background generative image enhancement failed:', backgroundErr);
+      } finally {
+        // Always clean up the uploaded temporary file once processing completes
+        fs.unlink(uploadedFilePath, () => undefined);
+      }
+    })();
+
   } catch (err) {
     // Clean up the uploaded file on processing failure
     fs.unlink(req.file.path, () => undefined);
@@ -273,6 +317,9 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
   const uploadedFilename = req.file.filename;
 
   try {
+    // 1. Perform in-place image downscaling and compression immediately
+    await resizeImageInPlace(uploadedPath);
+
     const metadata = await sharp(uploadedPath).metadata();
     if (!metadata.width || !metadata.height) {
       return res.status(400).json({ error: 'Could not read image dimensions' });
@@ -399,7 +446,10 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
   }
 
   try {
-    // 1. Tag photographed retail garment using AI
+    // 1. Perform in-place image downscaling and compression immediately
+    await resizeImageInPlace(req.file.path);
+
+    // 2. Tag photographed retail garment using AI
     const tags = await tagClothingItem(req.file.path);
 
     // 2. Fetch user's existing wardrobe items
