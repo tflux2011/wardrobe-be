@@ -682,21 +682,31 @@ export async function generateWeeklyOutfitPlanner(params: {
     gender: string;
   };
 }): Promise<WeeklyOutfitDay[]> {
-  const model = getGeminiModel('gemini-2.5-flash', { temperature: 0.8 });
+  const model = getGeminiModel('gemini-2.5-flash', {
+    temperature: 0.8,
+    responseMimeType: 'application/json',
+  });
   const { occasion, weather, wardrobe, styleProfile } = params;
 
-  const wardrobeSummary = wardrobe.map((item) => ({
+  // Pre-filter wardrobe to the requested occasion to shrink prompt size and speed up reasoning
+  let filteredWardrobe = wardrobe.filter((item) => {
+    if (!item.occasions || item.occasions.length === 0) return true;
+    return item.occasions.includes(occasion);
+  });
+
+  // Fallback: Ensure the model has enough items to generate a 7-day rotation
+  if (filteredWardrobe.length < 8) {
+    filteredWardrobe = wardrobe;
+  }
+
+  const wardrobeSummary = filteredWardrobe.map((item) => ({
     id: item.id,
     name: item.name,
     category: item.category,
     colors: item.colors,
     style: item.style,
-    occasions: item.occasions,
     lastWornAt: item.lastWornAt,
   }));
-
-  const randomSeed = Math.random().toString(36).substring(7);
-  const currentTime = new Date().toISOString();
 
   const result = await model.generateContent(
     `You are a personal stylist and coordinated capsule wardrobe planner. Design a coordinated 7-day capsule planner for the upcoming week (Monday through Sunday) for the selected occasion.
@@ -725,7 +735,7 @@ Return ONLY a JSON array of 7 objects (one for each day, Monday to Sunday) using
     "outfit": {
       "name": "Catchy outfit name",
       "itemIds": ["id1", "id2"],
-      "rationale": "One sentence explaining why this outfit is perfect for this day's weather and styling rotation."
+      "rationale": "Extremely concise rationale (maximum 12 words) explaining why this outfit is perfect."
     }
   }
 ]
