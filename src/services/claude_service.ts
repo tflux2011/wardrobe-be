@@ -658,3 +658,85 @@ Return ONLY a JSON array of 3 outfits matching this schema:
   return parseJsonResponse<OutfitSuggestion[]>(text);
 }
 
+export interface WeeklyOutfitDay {
+  day: string;
+  weatherSimulated: { temp: number; condition: string };
+  outfit: {
+    name: string;
+    itemIds: string[];
+    rationale: string;
+  };
+}
+
+/**
+ * Generate a coordinated 7-day capsule wardrobe outfit plan.
+ */
+export async function generateWeeklyOutfitPlanner(params: {
+  occasion: string;
+  weather: { temp: number; condition: string };
+  wardrobe: WardrobeItem[];
+  styleProfile?: {
+    skinTone: string;
+    undertone: string;
+    contrast: string;
+    gender: string;
+  };
+}): Promise<WeeklyOutfitDay[]> {
+  const model = getGeminiModel('gemini-2.5-flash', { temperature: 0.8 });
+  const { occasion, weather, wardrobe, styleProfile } = params;
+
+  const wardrobeSummary = wardrobe.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    colors: item.colors,
+    style: item.style,
+    occasions: item.occasions,
+    lastWornAt: item.lastWornAt,
+  }));
+
+  const randomSeed = Math.random().toString(36).substring(7);
+  const currentTime = new Date().toISOString();
+
+  const result = await model.generateContent(
+    `You are a personal stylist and coordinated capsule wardrobe planner. Design a coordinated 7-day capsule planner for the upcoming week (Monday through Sunday) for the selected occasion.
+
+Baseline Weather: ${weather.temp}°C, ${weather.condition}
+Selected Occasion: ${occasion}
+Wardrobe: ${JSON.stringify(wardrobeSummary, null, 2)}
+${styleProfile ? `Style profile: ${JSON.stringify(styleProfile, null, 2)}` : ''}
+
+Instructions and Rules:
+1. **Weather Simulation**: Generate/simulate a realistic weather forecast for each of the 7 days (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday) starting from the baseline weather of ${weather.temp}°C and condition "${weather.condition}" (allow minor realistic temperature fluctuations, e.g. ±3°C, and varying conditions like partly cloudy, sunny, light rain, clear).
+2. **Coordinated Rotation**: Plan a cohesive 7-day outfit sequence. Ensure that key pieces are rotated beautifully. Avoid repeating the exact same outfit. Show capsule versatility by mixing and matching!
+3. **Completeness**: Each outfit must contain at least a top + bottom (or dress) to make a complete look, suitable for the simulated weather of that day and the occasion.
+4. **Existing Wardrobe Only**: Use ONLY the item IDs present in the user's wardrobe.
+5. **Style Harmony**: Ensure color and style choices flatter the style profile if provided.
+
+Return ONLY a JSON array of 7 objects (one for each day, Monday to Sunday) using this exact schema:
+[
+  {
+    "day": "Monday",
+    "weatherSimulated": {
+      "temp": 21.5,
+      "condition": "Partly Cloudy"
+    },
+    "outfit": {
+      "name": "Catchy outfit name",
+      "itemIds": ["id1", "id2"],
+      "rationale": "One sentence explaining why this outfit is perfect for this day's weather and styling rotation."
+    }
+  }
+]
+
+Return JSON only, no markdown formatting or extra text.`
+  );
+
+  const text = result.response.text();
+  if (!text) {
+    throw new Error('Gemini returned an empty response');
+  }
+
+  return parseJsonResponse<WeeklyOutfitDay[]>(text);
+}
+

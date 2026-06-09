@@ -10,6 +10,7 @@ import { clothingRouter } from './routes/clothing';
 import { imagesRouter } from './routes/images';
 import { adminRouter } from './routes/admin';
 import { outfitsRouter } from './routes/outfits';
+import { weeklyRouter } from './routes/weekly';
 import { stylistRouter } from './routes/stylist';
 import { wardrobeRouter } from './routes/wardrobe';
 import tripsRouter from './routes/trips';
@@ -38,6 +39,7 @@ app.use('/api/wardrobe', requireAuth, wardrobeRouter);
 app.use('/api/clothing', requireAuth, clothingRouter);
 app.use('/api/images', requireAuth, imagesRouter);
 app.use('/api/outfits', requireAuth, outfitsRouter);
+app.use('/api/outfits', requireAuth, weeklyRouter);
 app.use('/api/stylist', stylistRateLimiter, requireAuth, stylistRouter);
 app.use('/api/trips', requireAuth, tripsRouter);
 

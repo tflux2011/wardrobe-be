@@ -21,7 +21,7 @@ declare global {
   }
 }
 
-const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY?.trim();
+const firebaseApiKey = process.env.FIREBASE_WEB_API_KEY?.trim().replace(/^["']|["']$/g, '');
 
 function parseBearerToken(headerValue?: string): string | null {
   if (!headerValue) return null;
@@ -32,7 +32,10 @@ function parseBearerToken(headerValue?: string): string | null {
 }
 
 async function lookupFirebaseUser(idToken: string): Promise<AuthenticatedUser | null> {
-  if (!firebaseApiKey) return null;
+  if (!firebaseApiKey) {
+    console.error('[auth] FIREBASE_WEB_API_KEY is not configured inside lookupFirebaseUser');
+    return null;
+  }
 
   const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseApiKey}`;
 
@@ -47,6 +50,10 @@ async function lookupFirebaseUser(idToken: string): Promise<AuthenticatedUser | 
   );
 
   if (response.status !== 200) {
+    console.error(
+      `[auth] Firebase Identity Toolkit lookup failed with status ${response.status}:`,
+      JSON.stringify(response.data)
+    );
     return null;
   }
 
@@ -54,6 +61,7 @@ async function lookupFirebaseUser(idToken: string): Promise<AuthenticatedUser | 
   const uid = user?.localId?.trim();
 
   if (!uid) {
+    console.error('[auth] Firebase user lookup returned status 200 but no localId/uid');
     return null;
   }
 
@@ -75,22 +83,25 @@ export async function requireAuth(
   }
 
   try {
-    const token = parseBearerToken(req.header('Authorization'));
+    const authHeader = req.header('Authorization');
+    const token = parseBearerToken(authHeader);
     if (!token) {
+      console.warn(`[auth] Missing or invalid Authorization header format. Raw header: "${authHeader}"`);
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
     const user = await lookupFirebaseUser(token);
     if (!user) {
+      console.warn('[auth] Firebase ID token lookup failed (token might be expired or invalid)');
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
     req.user = user;
     next();
-  } catch (error) {
-    console.error('[auth] token verification failed');
+  } catch (error: any) {
+    console.error('[auth] Token verification exception:', error.stack || error.message || error);
     res.status(401).json({ error: 'Unauthorized' });
   }
 }
