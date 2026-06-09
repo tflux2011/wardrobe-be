@@ -712,6 +712,7 @@ Instructions and Rules:
 3. **Completeness**: Each outfit must contain at least a top + bottom (or dress) to make a complete look, suitable for the simulated weather of that day and the occasion.
 4. **Existing Wardrobe Only**: Use ONLY the item IDs present in the user's wardrobe.
 5. **Style Harmony**: Ensure color and style choices flatter the style profile if provided.
+6. **Selection Awareness**: Prioritize styling items that have not been worn recently (based on the "lastWornAt" timestamp) to optimize closet utility and rotate user selections intelligently.
 
 Return ONLY a JSON array of 7 objects (one for each day, Monday to Sunday) using this exact schema:
 [

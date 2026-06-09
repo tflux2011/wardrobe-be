@@ -147,6 +147,57 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/wardrobe/wear
+wardrobeRouter.post('/wear', async (req: Request, res: Response) => {
+  const uid = req.user?.uid;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+  const wearSchema = z.object({
+    itemIds: z.array(z.string()),
+  });
+
+  const parsed = wearSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const { itemIds } = parsed.data;
+
+  try {
+    await ensureUser(uid, req.user?.email);
+    // Verify all items belong to this user
+    const dbItems = await prisma.clothingItem.findMany({
+      where: {
+        id: { in: itemIds },
+        userId: uid,
+      },
+    });
+
+    if (dbItems.length !== itemIds.length) {
+      return res.status(403).json({ error: 'Some items do not belong to you or do not exist' });
+    }
+
+    // Update lastWornAt and increment wearCount in a transaction
+    const now = new Date();
+    await prisma.$transaction(
+      itemIds.map((id) =>
+        prisma.clothingItem.update({
+          where: { id },
+          data: {
+            lastWornAt: now,
+            wearCount: { increment: 1 },
+          },
+        })
+      )
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[wardrobe/wear]', error);
+    return res.status(500).json({ error: 'Failed to record selections wear' });
+  }
+});
+
 // DELETE /api/wardrobe/:id
 wardrobeRouter.delete('/:id', async (req: Request, res: Response) => {
   const uid = req.user?.uid;
