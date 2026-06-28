@@ -24,11 +24,12 @@ const imageSchema = z.object({
   wardrobeContext: z.array(z.record(z.any())).optional().default([]),
   styleProfile: z
     .object({
-      skinTone: z.string().min(1).max(64),
-      undertone: z.string().min(1).max(64),
-      contrast: z.string().min(1).max(64),
-      gender: z.string().min(1).max(32),
+      skinTone: z.string().max(64).nullable().optional(),
+      undertone: z.string().max(64).nullable().optional(),
+      contrast: z.string().max(64).nullable().optional(),
+      gender: z.string().max(32).nullable().optional(),
     })
+    .nullable()
     .optional(),
 });
 
@@ -222,6 +223,14 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
     return res.status(503).json({ error: 'No Gemini models configured for image generation' });
   }
 
+  const gender = parsed.data.styleProfile?.gender?.toLowerCase() ?? 'unisex';
+  let mannequinType = 'unisex retail mannequin';
+  if (gender === 'male' || gender === 'men' || gender === 'man') {
+    mannequinType = 'male retail mannequin';
+  } else if (gender === 'female' || gender === 'women' || gender === 'woman') {
+    mannequinType = 'female retail mannequin';
+  }
+
   const wardrobeSummary = parsed.data.wardrobeContext.length > 0
     ? `\n\nUse this wardrobe context:\n${JSON.stringify(parsed.data.wardrobeContext, null, 2)}`
     : '';
@@ -229,22 +238,37 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
     ? `\n\nUser style profile: ${JSON.stringify(parsed.data.styleProfile, null, 2)}`
     : '';
 
+  // Clean up user prompt to avoid checkerboard grid generation
+  let cleanedUserPrompt = parsed.data.prompt
+    .replace(/background style:\s*transparent/gi, 'Background style: solid flat warm cream sand linen background (color hex #FDFBF7)')
+    .replace(/background:\s*transparent/gi, 'Background style: solid flat warm cream sand linen background (color hex #FDFBF7)');
+
   const generateView = async (view: 'front' | 'back') => {
+    let backgroundStyleRule = 'white seamless background';
+    let appBackgroundOverride = '';
+    const lowercasePrompt = parsed.data.prompt.toLowerCase();
+    if (lowercasePrompt.includes('background style: transparent') || lowercasePrompt.includes('background: transparent')) {
+      backgroundStyleRule = 'solid flat cream sand linen color background (hex color #FDFBF7)';
+      appBackgroundOverride = '\nBackground color (mandatory): Solid flat uniform cream sand linen color (Hex #FDFBF7) background. Do NOT generate checkerboard grids, transparent pixel patterns, grey-and-white grids, or alpha channels. The background must be completely solid and uniform.';
+    } else if (lowercasePrompt.includes('background style: soft neutral')) {
+      backgroundStyleRule = 'soft neutral gray seamless background';
+    }
+
     const viewInstruction = view === 'front'
-      ? 'Camera faces the mannequin from the front. Entire mannequin visible from head to feet.'
-      : 'Camera faces the mannequin from the back. Entire mannequin visible from head to feet. Back of outfit only.';
+      ? `Camera faces the 3D model of the ${mannequinType} from the front. Entire 3D mannequin model visible from head to feet.`
+      : `Camera faces the 3D model of the ${mannequinType} from the back. Entire 3D mannequin model visible from head to feet. Back of outfit only.`;
     const prompt = `Generate exactly ONE product-style fashion preview image.
 Subject rules (mandatory):
-- Exactly one full-body retail mannequin only.
-- Entire mannequin must be visible from head to feet in frame.
+- Exactly one full-body 3D digital model of a ${mannequinType} only.
+- Entire 3D model mannequin must be visible from head to feet in frame.
 - No human model, no real person, no extra bodies, no reflections.
 - No collage, diptych, side-by-side, split-screen, before/after, or tiled layout.
 - No front-and-back combined in one image.
 - No text, watermark, logo, UI, props, or background scene.
 View requirement: ${viewInstruction}
-Output style: studio catalog photo, neutral studio lighting, white seamless or transparent background.
-Garment fit: all selected outfit pieces should appear correctly worn on the mannequin with realistic drape.
-${parsed.data.prompt}${wardrobeSummary}${styleProfileSummary}`;
+Output style: 3D CGI digital model render, glossy clean mannequin material, studio lighting, ${backgroundStyleRule}.${appBackgroundOverride}
+Garment fit: all selected outfit pieces should appear correctly worn on the 3D model of the ${mannequinType} with realistic drape.
+${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
 
     for (const model of models) {
       try {

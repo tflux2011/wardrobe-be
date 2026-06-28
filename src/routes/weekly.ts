@@ -13,11 +13,13 @@ const weeklySchema = z.object({
   }),
   styleProfile: z
     .object({
-      skinTone: z.string().min(1).max(64),
-      undertone: z.string().min(1).max(64),
-      contrast: z.string().min(1).max(64),
-      gender: z.string().min(1).max(32),
+      skinTone: z.string().max(64).nullable().optional(),
+      undertone: z.string().max(64).nullable().optional(),
+      contrast: z.string().max(64).nullable().optional(),
+      gender: z.string().max(32).nullable().optional(),
     })
+    .passthrough()
+    .nullable()
     .optional(),
 });
 
@@ -59,7 +61,7 @@ weeklyRouter.post('/weekly', async (req: Request, res: Response) => {
       occasion,
       weather,
       wardrobe,
-      styleProfile,
+      styleProfile: styleProfile || undefined,
     });
     return res.json(suggestions);
   } catch (err) {

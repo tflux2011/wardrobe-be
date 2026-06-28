@@ -387,10 +387,10 @@ export async function generateOutfitSuggestions(params: {
   weather: { temp: number; condition: string };
   wardrobe: WardrobeItem[];
   styleProfile?: {
-    skinTone: string;
-    undertone: string;
-    contrast: string;
-    gender: string;
+    skinTone?: string | null;
+    undertone?: string | null;
+    contrast?: string | null;
+    gender?: string | null;
   };
 }): Promise<OutfitSuggestion[]> {
   const model = getGeminiModel('gemini-2.5-flash', { temperature: 1.0 });
@@ -676,10 +676,10 @@ export async function generateWeeklyOutfitPlanner(params: {
   weather: { temp: number; condition: string };
   wardrobe: WardrobeItem[];
   styleProfile?: {
-    skinTone: string;
-    undertone: string;
-    contrast: string;
-    gender: string;
+    skinTone?: string | null;
+    undertone?: string | null;
+    contrast?: string | null;
+    gender?: string | null;
   };
 }): Promise<WeeklyOutfitDay[]> {
   const model = getGeminiModel('gemini-2.5-flash', {
