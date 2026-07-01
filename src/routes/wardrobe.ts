@@ -117,6 +117,40 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
       enhancedImageCache.delete(data.imageUrl); // clean up memory mapping
     }
     
+    // If an ID is provided, check if it already exists to handle retries and syncing safely.
+    if (data.id) {
+      const existing = await prisma.clothingItem.findUnique({
+        where: { id: data.id }
+      });
+      if (existing) {
+        if (existing.userId !== uid) {
+          return res.status(403).json({ error: 'Forbidden: Item belongs to another user' });
+        }
+        const updatedItem = await prisma.clothingItem.update({
+          where: { id: data.id },
+          data: {
+            name: data.name,
+            category: data.category,
+            style: data.style,
+            colors: JSON.stringify(data.colors),
+            occasions: JSON.stringify(data.occasions),
+            seasons: JSON.stringify(data.seasons),
+            tags: JSON.stringify(data.tags),
+            imageUrl: imageUrl,
+            localImagePath: data.localImagePath,
+            price: data.price,
+          },
+        });
+        return res.json({
+          ...updatedItem,
+          colors: JSON.parse(updatedItem.colors),
+          occasions: JSON.parse(updatedItem.occasions),
+          seasons: JSON.parse(updatedItem.seasons),
+          tags: JSON.parse(updatedItem.tags),
+        });
+      }
+    }
+    
     const newItem = await prisma.clothingItem.create({
       data: {
         id: data.id, // optional
