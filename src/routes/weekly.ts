@@ -18,7 +18,6 @@ const weeklySchema = z.object({
       contrast: z.string().max(64).nullable().optional(),
       gender: z.string().max(32).nullable().optional(),
     })
-    .passthrough()
     .nullable()
     .optional(),
 });

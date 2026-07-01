@@ -709,7 +709,7 @@ export async function generateWeeklyOutfitPlanner(params: {
   }));
 
   const result = await model.generateContent(
-    `You are a personal stylist and coordinated capsule wardrobe planner. Design a coordinated 7-day capsule planner for the upcoming week (Monday through Sunday) for the selected occasion.
+    `You are a personal stylist and coordinated capsule wardrobe planner. Design a coordinated 7-day capsule planner for the upcoming week (Monday through Sunday) for the selected occasion. Keep all text output extremely minimal to maximize loading speed.
 
 Baseline Weather: ${weather.temp}°C, ${weather.condition}
 Selected Occasion: ${occasion}
@@ -723,6 +723,7 @@ Instructions and Rules:
 4. **Existing Wardrobe Only**: Use ONLY the item IDs present in the user's wardrobe.
 5. **Style Harmony**: Ensure color and style choices flatter the style profile if provided.
 6. **Selection Awareness**: Prioritize styling items that have not been worn recently (based on the "lastWornAt" timestamp) to optimize closet utility and rotate user selections intelligently.
+7. **Brevity**: Keep outfit names under 4 words and rationales under 8 words.
 
 Return ONLY a JSON array of 7 objects (one for each day, Monday to Sunday) using this exact schema:
 [
@@ -735,7 +736,7 @@ Return ONLY a JSON array of 7 objects (one for each day, Monday to Sunday) using
     "outfit": {
       "name": "Catchy outfit name",
       "itemIds": ["id1", "id2"],
-      "rationale": "Extremely concise rationale (maximum 12 words) explaining why this outfit is perfect."
+      "rationale": "Max 8 words rationale."
     }
   }
 ]

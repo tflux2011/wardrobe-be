@@ -257,9 +257,17 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
     const viewInstruction = view === 'front'
       ? `Camera faces the 3D model of the ${mannequinType} from the front. Entire 3D mannequin model visible from head to feet.`
       : `Camera faces the 3D model of the ${mannequinType} from the back. Entire 3D mannequin model visible from head to feet. Back of outfit only.`;
+
+    const genderConstraint = (gender === 'male' || gender === 'men' || gender === 'man')
+      ? 'The mannequin must strictly have a masculine physical build, form, and silhouette. Avoid any feminine features, shapes, curves, or styling details.'
+      : (gender === 'female' || gender === 'women' || gender === 'woman')
+        ? 'The mannequin must strictly have a feminine physical build, form, and silhouette.'
+        : 'The mannequin should have a neutral unisex physical build.';
+
     const prompt = `Generate exactly ONE product-style fashion preview image.
 Subject rules (mandatory):
 - Exactly one full-body 3D digital model of a ${mannequinType} only.
+- ${genderConstraint}
 - Entire 3D model mannequin must be visible from head to feet in frame.
 - No human model, no real person, no extra bodies, no reflections.
 - No collage, diptych, side-by-side, split-screen, before/after, or tiled layout.
