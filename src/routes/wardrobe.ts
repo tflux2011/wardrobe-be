@@ -59,11 +59,39 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
 
   try {
     await ensureUser(uid, req.user?.email);
-    const dbItems = await prisma.clothingItem.findMany({
+    let dbItems = await prisma.clothingItem.findMany({
       where: { userId: uid },
       orderBy: { addedAt: 'desc' },
     });
     
+    // Auto-heal / Fallback: If 0 items found for current UID, search for items linked to other UIDs with the same verified email
+    if (dbItems.length === 0 && req.user?.email) {
+      const emailMatchUsers = await prisma.user.findMany({
+        where: { email: req.user.email, id: { not: uid } },
+      });
+
+      if (emailMatchUsers.length > 0) {
+        const otherUids = emailMatchUsers.map((u: any) => u.id);
+        const orphanItems = await prisma.clothingItem.findMany({
+          where: { userId: { in: otherUids } },
+          orderBy: { addedAt: 'desc' },
+        });
+
+        if (orphanItems.length > 0) {
+          console.log(`[wardrobe/auto-heal] Found ${orphanItems.length} items linked to old UID(s) for ${req.user.email}. Re-linking to current UID ${uid}...`);
+          await prisma.clothingItem.updateMany({
+            where: { userId: { in: otherUids } },
+            data: { userId: uid },
+          });
+
+          dbItems = await prisma.clothingItem.findMany({
+            where: { userId: uid },
+            orderBy: { addedAt: 'desc' },
+          });
+        }
+      }
+    }
+
     // Parse JSON string fields back to arrays
     const items = dbItems.map((item: any) => ({
       ...item,

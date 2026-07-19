@@ -85,6 +85,44 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
   const prompt = `Create a polished fashion inspiration image. Do not render app UI or text overlays. Focus on editorial styling and coherent outfit composition. The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. ${parsed.data.prompt}${wardrobeSummary}`;
 
   try {
+    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
+      try {
+        console.log('[images/inspire] Generating fashion inspiration using OpenAI DALL-E 3 HD...');
+        const openaiRes = await axios.post(
+          'https://api.openai.com/v1/images/generations',
+          {
+            model: 'dall-e-3',
+            prompt: prompt,
+            n: 1,
+            size: '1024x1792',
+            quality: 'hd',
+            response_format: 'b64_json',
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${openaiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 60000,
+          },
+        );
+
+        const b64Data = openaiRes.data?.data?.[0]?.b64_json;
+        if (b64Data) {
+          const imageUrl = saveImageToDisk(b64Data);
+          return res.json({
+            imageBase64: b64Data,
+            imageUrl,
+            mimeType: 'image/png',
+            model: 'dall-e-3',
+          });
+        }
+      } catch (err: any) {
+        console.warn('[images/inspire] DALL-E 3 generation failed:', err.response?.data || err.message, '- falling back to Gemini.');
+      }
+    }
+
     if (models.length === 0) {
       return res.status(503).json({ error: 'No Gemini models configured for image generation' });
     }
@@ -264,7 +302,7 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
         ? 'The mannequin must strictly have a feminine physical build, form, and silhouette.'
         : 'The mannequin should have a neutral unisex physical build.';
 
-    const prompt = `Generate exactly ONE product-style fashion preview image.
+    const prompt = `Generate exactly ONE product-style fashion preview image of a mannequin wearing the specified outfit.
 Subject rules (mandatory):
 - Exactly one full-body 3D digital model of a ${mannequinType} only.
 - ${genderConstraint}
@@ -274,9 +312,46 @@ Subject rules (mandatory):
 - No front-and-back combined in one image.
 - No text, watermark, logo, UI, props, or background scene.
 View requirement: ${viewInstruction}
+Garment accuracy (strict requirement):
+- Strictly match the exact clothing pieces described below.
+- Render the exact colorways, sleeve length, collar, pattern, and silhouette of each specified item.
+- Dress the ${mannequinType} in these exact pieces with realistic fabric drape.
 Output style: 3D CGI digital model render, glossy clean mannequin material, studio lighting, ${backgroundStyleRule}.${appBackgroundOverride}
-Garment fit: all selected outfit pieces should appear correctly worn on the 3D model of the ${mannequinType} with realistic drape.
 ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
+
+    // Try OpenAI DALL-E 3 first if OPENAI_API_KEY is configured
+    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
+      try {
+        console.log(`[images/outfit] Generating ${view} view using OpenAI DALL-E 3 HD...`);
+        const openaiRes = await axios.post(
+          'https://api.openai.com/v1/images/generations',
+          {
+            model: 'dall-e-3',
+            prompt: prompt,
+            n: 1,
+            size: '1024x1792',
+            quality: 'hd',
+            response_format: 'b64_json',
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${openaiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 60000,
+          },
+        );
+
+        const b64Data = openaiRes.data?.data?.[0]?.b64_json;
+        if (b64Data) {
+          console.log(`[images/outfit] OpenAI DALL-E 3 ${view} view generated successfully!`);
+          return b64Data;
+        }
+      } catch (err: any) {
+        console.warn(`[images/outfit] DALL-E 3 generation failed for ${view} view:`, err.response?.data || err.message, '- falling back to Gemini.');
+      }
+    }
 
     for (const model of models) {
       try {
