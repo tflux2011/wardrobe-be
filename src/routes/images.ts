@@ -283,8 +283,15 @@ imagesRouter.post('/outfit', async (req: Request, res: Response) => {
     mannequinType = 'female retail mannequin';
   }
 
-  const wardrobeSummary = parsed.data.wardrobeContext.length > 0
-    ? `\n\nUse this wardrobe context:\n${JSON.stringify(parsed.data.wardrobeContext, null, 2)}`
+  const explicitGarmentList = parsed.data.wardrobeContext.map((item: any) => {
+    const colorsStr = Array.isArray(item.colors) && item.colors.length > 0 
+      ? item.colors.join(', ') 
+      : (typeof item.colors === 'string' && item.colors ? item.colors : 'specified color');
+    return `- ${item.category?.toUpperCase() || 'GARMENT'}: "${item.name}" (EXACT COLOR: ${colorsStr.toUpperCase()})`;
+  }).join('\n');
+
+  const wardrobeSummary = explicitGarmentList.length > 0
+    ? `\n\nEXACT OUTFIT GARMENTS & MANDATORY COLORS:\n${explicitGarmentList}`
     : '';
   const styleProfileSummary = parsed.data.styleProfile
     ? `\n\nUser style profile: ${JSON.stringify(parsed.data.styleProfile, null, 2)}`
@@ -326,8 +333,10 @@ Subject rules (mandatory):
 - No front-and-back combined in one image.
 - No text, watermark, logo, UI, props, or background scene.
 View requirement: ${viewInstruction}
-Garment accuracy (strict requirement):
-- Strictly match the exact clothing pieces described below.
+
+STRICT COLOR & GARMENT ACCURACY (MANDATORY):
+- Match the EXACT colors of each specified piece below.
+- DO NOT CHANGE OR SUBSTITUTE COLORS (e.g. if a shirt is green, it MUST be rendered in green, NOT blue or black).
 - Render the exact colorways, sleeve length, collar, pattern, and silhouette of each specified item.
 - Dress the ${mannequinType} in these exact pieces with realistic fabric drape.
 Output style: 3D CGI digital model render, glossy clean mannequin material, studio lighting, ${backgroundStyleRule}.${appBackgroundOverride}
