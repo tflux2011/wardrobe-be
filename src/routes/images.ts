@@ -87,46 +87,51 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
   try {
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
-      try {
-        console.log('[images/inspire] Generating fashion inspiration using OpenAI DALL-E 3 HD...');
-        const openaiRes = await axios.post(
-          'https://api.openai.com/v1/images/generations',
-          {
-            model: 'dall-e-3',
+      const openaiModels = ['gpt-image-2', 'gpt-image-2-2026-04-21', 'dall-e-3', 'dall-e-2'];
+      for (const m of openaiModels) {
+        try {
+          console.log(`[images/inspire] Generating fashion inspiration using OpenAI ${m}...`);
+          const bodyPayload: any = {
+            model: m,
             prompt: prompt,
             n: 1,
-            size: '1024x1792',
-            quality: 'hd',
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${openaiKey}`,
-              'Content-Type': 'application/json',
+            size: m === 'dall-e-2' ? '1024x1024' : '1024x1792',
+          };
+          if (m !== 'dall-e-2') bodyPayload.quality = 'hd';
+
+          const openaiRes = await axios.post(
+            'https://api.openai.com/v1/images/generations',
+            bodyPayload,
+            {
+              headers: {
+                'Authorization': `Bearer ${openaiKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 60000,
             },
-            timeout: 60000,
-          },
-        );
+          );
 
-        const imgUrl = openaiRes.data?.data?.[0]?.url;
-        const b64Json = openaiRes.data?.data?.[0]?.b64_json;
-        let b64Data = b64Json;
+          const imgUrl = openaiRes.data?.data?.[0]?.url;
+          const b64Json = openaiRes.data?.data?.[0]?.b64_json;
+          let b64Data = b64Json;
 
-        if (!b64Data && imgUrl) {
-          const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
-          b64Data = Buffer.from(imgDownload.data).toString('base64');
+          if (!b64Data && imgUrl) {
+            const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
+            b64Data = Buffer.from(imgDownload.data).toString('base64');
+          }
+
+          if (b64Data) {
+            const imageUrl = saveImageToDisk(b64Data);
+            return res.json({
+              imageBase64: b64Data,
+              imageUrl,
+              mimeType: 'image/png',
+              model: m,
+            });
+          }
+        } catch (err: any) {
+          console.warn(`[images/inspire] OpenAI ${m} generation failed:`, err.response?.data || err.message);
         }
-
-        if (b64Data) {
-          const imageUrl = saveImageToDisk(b64Data);
-          return res.json({
-            imageBase64: b64Data,
-            imageUrl,
-            mimeType: 'image/png',
-            model: 'dall-e-3',
-          });
-        }
-      } catch (err: any) {
-        console.warn('[images/inspire] DALL-E 3 generation failed:', err.response?.data || err.message, '- falling back to Gemini.');
       }
     }
 
@@ -326,10 +331,12 @@ Garment accuracy (strict requirement):
 Output style: 3D CGI digital model render, glossy clean mannequin material, studio lighting, ${backgroundStyleRule}.${appBackgroundOverride}
 ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
 
-    // Try OpenAI models (DALL-E 3 then DALL-E 2) if OPENAI_API_KEY is configured
+    // Try OpenAI models (gpt-image-2 then dall-e-3 then dall-e-2) if OPENAI_API_KEY is configured
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
       const openaiModels = [
+        { model: 'gpt-image-2', size: '1024x1792', quality: 'hd' },
+        { model: 'gpt-image-2-2026-04-21', size: '1024x1792', quality: 'hd' },
         { model: 'dall-e-3', size: '1024x1792', quality: 'hd' },
         { model: 'dall-e-2', size: '1024x1024', quality: undefined },
       ];
