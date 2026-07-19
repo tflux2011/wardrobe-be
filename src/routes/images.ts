@@ -97,7 +97,6 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
             n: 1,
             size: '1024x1792',
             quality: 'hd',
-            response_format: 'b64_json',
           },
           {
             headers: {
@@ -108,7 +107,15 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
           },
         );
 
-        const b64Data = openaiRes.data?.data?.[0]?.b64_json;
+        const imgUrl = openaiRes.data?.data?.[0]?.url;
+        const b64Json = openaiRes.data?.data?.[0]?.b64_json;
+        let b64Data = b64Json;
+
+        if (!b64Data && imgUrl) {
+          const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
+          b64Data = Buffer.from(imgDownload.data).toString('base64');
+        }
+
         if (b64Data) {
           const imageUrl = saveImageToDisk(b64Data);
           return res.json({
@@ -332,7 +339,6 @@ ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
             n: 1,
             size: '1024x1792',
             quality: 'hd',
-            response_format: 'b64_json',
           },
           {
             headers: {
@@ -343,7 +349,15 @@ ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
           },
         );
 
-        const b64Data = openaiRes.data?.data?.[0]?.b64_json;
+        const imgUrl = openaiRes.data?.data?.[0]?.url;
+        const b64Json = openaiRes.data?.data?.[0]?.b64_json;
+        let b64Data = b64Json;
+
+        if (!b64Data && imgUrl) {
+          const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
+          b64Data = Buffer.from(imgDownload.data).toString('base64');
+        }
+
         if (b64Data) {
           console.log(`[images/outfit] OpenAI DALL-E 3 ${view} view generated successfully!`);
           return b64Data;
