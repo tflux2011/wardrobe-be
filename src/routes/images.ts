@@ -87,17 +87,22 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
   try {
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
-      const openaiModels = ['gpt-image-2', 'gpt-image-2-2026-04-21', 'dall-e-3', 'dall-e-2'];
+      const openaiModels = [
+        { model: 'gpt-image-2', quality: 'high', size: '1024x1792' },
+        { model: 'gpt-image-2-2026-04-21', quality: 'high', size: '1024x1792' },
+        { model: 'dall-e-3', quality: 'hd', size: '1024x1792' },
+        { model: 'dall-e-2', quality: undefined, size: '1024x1024' },
+      ];
       for (const m of openaiModels) {
         try {
-          console.log(`[images/inspire] Generating fashion inspiration using OpenAI ${m}...`);
+          console.log(`[images/inspire] Generating fashion inspiration using OpenAI ${m.model}...`);
           const bodyPayload: any = {
-            model: m,
+            model: m.model,
             prompt: prompt,
             n: 1,
-            size: m === 'dall-e-2' ? '1024x1024' : '1024x1792',
+            size: m.size,
           };
-          if (m !== 'dall-e-2') bodyPayload.quality = 'hd';
+          if (m.quality) bodyPayload.quality = m.quality;
 
           const openaiRes = await axios.post(
             'https://api.openai.com/v1/images/generations',
@@ -335,8 +340,8 @@ ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
       const openaiModels = [
-        { model: 'gpt-image-2', size: '1024x1792', quality: 'hd' },
-        { model: 'gpt-image-2-2026-04-21', size: '1024x1792', quality: 'hd' },
+        { model: 'gpt-image-2', size: '1024x1792', quality: 'high' },
+        { model: 'gpt-image-2-2026-04-21', size: '1024x1792', quality: 'high' },
         { model: 'dall-e-3', size: '1024x1792', quality: 'hd' },
         { model: 'dall-e-2', size: '1024x1024', quality: undefined },
       ];
