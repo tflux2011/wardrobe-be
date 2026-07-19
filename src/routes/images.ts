@@ -326,44 +326,53 @@ Garment accuracy (strict requirement):
 Output style: 3D CGI digital model render, glossy clean mannequin material, studio lighting, ${backgroundStyleRule}.${appBackgroundOverride}
 ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
 
-    // Try OpenAI DALL-E 3 first if OPENAI_API_KEY is configured
+    // Try OpenAI models (DALL-E 3 then DALL-E 2) if OPENAI_API_KEY is configured
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
-      try {
-        console.log(`[images/outfit] Generating ${view} view using OpenAI DALL-E 3 HD...`);
-        const openaiRes = await axios.post(
-          'https://api.openai.com/v1/images/generations',
-          {
-            model: 'dall-e-3',
+      const openaiModels = [
+        { model: 'dall-e-3', size: '1024x1792', quality: 'hd' },
+        { model: 'dall-e-2', size: '1024x1024', quality: undefined },
+      ];
+
+      for (const m of openaiModels) {
+        try {
+          console.log(`[images/outfit] Generating ${view} view using OpenAI ${m.model}...`);
+          const bodyPayload: any = {
+            model: m.model,
             prompt: prompt,
             n: 1,
-            size: '1024x1792',
-            quality: 'hd',
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${openaiKey}`,
-              'Content-Type': 'application/json',
+            size: m.size,
+          };
+          if (m.quality) bodyPayload.quality = m.quality;
+
+          const openaiRes = await axios.post(
+            'https://api.openai.com/v1/images/generations',
+            bodyPayload,
+            {
+              headers: {
+                'Authorization': `Bearer ${openaiKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 60000,
             },
-            timeout: 60000,
-          },
-        );
+          );
 
-        const imgUrl = openaiRes.data?.data?.[0]?.url;
-        const b64Json = openaiRes.data?.data?.[0]?.b64_json;
-        let b64Data = b64Json;
+          const imgUrl = openaiRes.data?.data?.[0]?.url;
+          const b64Json = openaiRes.data?.data?.[0]?.b64_json;
+          let b64Data = b64Json;
 
-        if (!b64Data && imgUrl) {
-          const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
-          b64Data = Buffer.from(imgDownload.data).toString('base64');
+          if (!b64Data && imgUrl) {
+            const imgDownload = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
+            b64Data = Buffer.from(imgDownload.data).toString('base64');
+          }
+
+          if (b64Data) {
+            console.log(`[images/outfit] OpenAI ${m.model} ${view} view generated successfully!`);
+            return b64Data;
+          }
+        } catch (err: any) {
+          console.warn(`[images/outfit] OpenAI ${m.model} failed for ${view} view:`, err.response?.data || err.message);
         }
-
-        if (b64Data) {
-          console.log(`[images/outfit] OpenAI DALL-E 3 ${view} view generated successfully!`);
-          return b64Data;
-        }
-      } catch (err: any) {
-        console.warn(`[images/outfit] DALL-E 3 generation failed for ${view} view:`, err.response?.data || err.message, '- falling back to Gemini.');
       }
     }
 
