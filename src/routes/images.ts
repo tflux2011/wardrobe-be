@@ -88,10 +88,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
       const openaiModels = [
-        { model: 'gpt-image-2', quality: 'high', size: '1024x1792' },
-        { model: 'gpt-image-2-2026-04-21', quality: 'high', size: '1024x1792' },
-        { model: 'dall-e-3', quality: 'hd', size: '1024x1792' },
-        { model: 'dall-e-2', quality: undefined, size: '1024x1024' },
+        { model: 'gpt-image-2', quality: 'auto', size: '1024x1792' },
       ];
       for (const m of openaiModels) {
         try {
@@ -112,7 +109,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
                 'Authorization': `Bearer ${openaiKey}`,
                 'Content-Type': 'application/json',
               },
-              timeout: 60000,
+              timeout: 120000,
             },
           );
 
@@ -340,10 +337,7 @@ ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
       const openaiModels = [
-        { model: 'gpt-image-2', size: '1024x1792', quality: 'high' },
-        { model: 'gpt-image-2-2026-04-21', size: '1024x1792', quality: 'high' },
-        { model: 'dall-e-3', size: '1024x1792', quality: 'hd' },
-        { model: 'dall-e-2', size: '1024x1024', quality: undefined },
+        { model: 'gpt-image-2', size: '1024x1792', quality: 'auto' },
       ];
 
       for (const m of openaiModels) {
@@ -365,7 +359,7 @@ ${cleanedUserPrompt}${wardrobeSummary}${styleProfileSummary}`;
                 'Authorization': `Bearer ${openaiKey}`,
                 'Content-Type': 'application/json',
               },
-              timeout: 60000,
+              timeout: 120000,
             },
           );
 
