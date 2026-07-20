@@ -1,6 +1,6 @@
 {
   "name": "wardrobe-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Wardrobe AI backend — outfit suggestions, clothing tagging, stylist chat",
   "main": "dist/index.js",
   "scripts": {
