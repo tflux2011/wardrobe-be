@@ -1,3 +1,4 @@
+import {generateValidatedTrip, TripGenerationError} from '../services/trip_generation';
 import { Router } from 'express';
 import { dayChange,packingAfterDayChange } from '../services/trip_editing';
 import { prisma } from '../lib/prisma';
@@ -57,7 +58,8 @@ router.post('/plan', async (req, res) => {
       return res.status(400).json({ error: 'Your closet is empty. Add clothes first.' });
     }
 
-    const generated = await generateTripPlan({
+    const plan = await generateValidatedTrip((repair) => generateTripPlan({
+      repair,
       destination,
       startDate,
       endDate,
@@ -75,9 +77,7 @@ router.post('/plan', async (req, res) => {
         lastWornAt: i.lastWornAt?.toISOString(),
       })),
       styleProfile,
-    });
-
-    const plan = validateTripPlan(generated, wardrobe.map(item => item.id), dates.days,parsed.data.travelDetails?.maxPieces);
+    }), wardrobe.map(item => item.id), dates.days, parsed.data.travelDetails?.maxPieces);
 
     if(parsed.data.travelDetails && plan.dailyOutfits.length) (plan.dailyOutfits[0] as any).travelDetails=parsed.data.travelDetails;
     const trip = await prisma.trip.create({
@@ -195,7 +195,7 @@ router.post('/plan', async (req, res) => {
     });
 
   } catch (error) {
-    if(error instanceof Error && error.message.includes('packing target'))return res.status(422).json({error:error.message});
+    if(error instanceof TripGenerationError)return res.status(422).json({error:error.message});
     console.error('Error planning trip:', error);
     res.status(500).json({ error: 'Failed to generate trip plan' });
   }

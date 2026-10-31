@@ -1,3 +1,4 @@
+import {tripWardrobeReferences} from './trip_generation';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
@@ -472,8 +473,10 @@ export async function generateTripPlan(params: {
   wardrobe: any[];
   homeCity?: string;
   styleProfile?: any;
+  repair?: boolean;
 }): Promise<TripPlan> {
-  const model = getGeminiModel();
+  const model = getGeminiModel('gemini-2.5-flash', {responseMimeType: 'application/json', temperature: params.repair ? 0.2 : 0.6});
+  const references = tripWardrobeReferences(params.wardrobe);
   const { destination, startDate, endDate, purpose, wardrobe, homeCity, styleProfile } = params;
 
   const styleContext = styleProfile
@@ -499,8 +502,9 @@ ${homeCityContext}
 ${styleContext}
 
 User's Existing Wardrobe Items:
-${JSON.stringify(wardrobe, null, 2)}
+${JSON.stringify(references.wardrobe)}
 
+${params.repair ? 'The previous attempt did not pass validation. Carefully check every piece reference, include every trip day, and stay within the packing target. Never use placeholder IDs.' : ''}
 Your styling instructions are:
 1. **Sophistication & Cohesion**: Do not recommend generic or basic outfits. Design highly cohesive, fashionable, and aesthetic looks that match the local climate and fashion culture of ${destination} for the purpose of a ${purpose} trip.
 2. **Personalized Color Theory**: Utilize the user's style profile (especially skin tone, undertone, and contrast level) to choose flattering garment colors from their wardrobe. Match warm undertones with earth/warm tones, cool undertones with cool/jewel tones, and contrast level for bold vs. monochromatic coordination.
@@ -511,13 +515,13 @@ Your styling instructions are:
 
 Return ONLY a JSON object with this exact shape:
 {
-  "packingList": ["id1", "id2"],
+  "packingList": ["piece_1", "piece_2"],
   "dailyOutfits": [
     {
       "day": 1,
       "outfit": {
         "name": "E.g., Casual Parisian Chic",
-        "itemIds": ["id1"],
+        "itemIds": ["piece_1"],
         "rationale": "Styling rationale explaining the color harmony and silhouette synergy for the day's events."
       }
     }
@@ -526,7 +530,7 @@ Return ONLY a JSON object with this exact shape:
     {
       "name": "E.g., Beige Linen Blazer",
       "category": "outerwear",
-      "pairWithItemIds": ["exact-existing-item-id"],
+      "pairWithItemIds": ["piece_1"],
       "reason": "An elegant layering piece that adds structured sophistication. Elevates your daily denim look and matches perfectly with your white shirt."
     }
   ]
@@ -538,7 +542,7 @@ Return ONLY a JSON object with this exact shape:
     throw new Error('Gemini returned an empty response');
   }
 
-  return parseJsonResponse<TripPlan>(text);
+  return references.restore(parseJsonResponse<TripPlan>(text));
 }
 
 export interface StoreItemMatch {
