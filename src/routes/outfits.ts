@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { generateOutfitSuggestions } from '../services/claude_service';
 import { prisma } from '../lib/prisma';
+import { rotationCandidates } from '../services/wardrobe_rotation';
 
 export const outfitsRouter = Router();
 
@@ -18,6 +19,7 @@ const suggestSchema = z.object({
       contrast: z.string().max(64).nullable().optional(),
       gender: z.string().max(32).nullable().optional(),
     })
+    .passthrough()
     .nullable()
     .optional(),
   itemIds: z.array(z.string()).optional(),
@@ -50,7 +52,7 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
     }
 
     // Format for Claude service
-    const wardrobe = dbItems.map((item: any) => ({
+    const wardrobe = rotationCandidates(dbItems,Number((styleProfile as any)?.rotationDays??3)).map((item: any) => ({
       id: item.id,
       name: item.name,
       category: item.category,
@@ -60,13 +62,14 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
       seasons: JSON.parse(item.seasons),
       tags: JSON.parse(item.tags),
       lastWornAt: item.lastWornAt?.toISOString(),
+      wearCount:item.wearCount,
     }));
 
     const suggestions = await generateOutfitSuggestions({
       occasion,
       weather,
       wardrobe,
-      styleProfile: styleProfile || undefined,
+      styleProfile:styleProfile||undefined,
     });
     return res.json(suggestions);
   } catch (err) {

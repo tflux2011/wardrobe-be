@@ -257,7 +257,7 @@ export async function detectGarmentRegions(
 
   const imageData = fs.readFileSync(imagePath);
   const base64Image = imageData.toString('base64');
-  const mimeType: 'image/png' | 'image/jpeg' = ext === '.png' ? 'image/png' : 'image/jpeg';
+  const mimeType: 'image/png' | 'image/jpeg' = imageData[0]===0xff && imageData[1]===0xd8 ? 'image/jpeg' : 'image/png';
 
   const result = await model.generateContent([
     {
@@ -376,6 +376,7 @@ interface WardrobeItem {
   occasions: string[];
   seasons: string[];
   tags: string[];
+  wearCount?:number;
   lastWornAt?: string;
 }
 
@@ -404,6 +405,9 @@ export async function generateOutfitSuggestions(params: {
     style: item.style,
     occasions: item.occasions,
     lastWornAt: item.lastWornAt,
+    wearCount:item.wearCount,
+    tags:item.tags,
+    seasons:item.seasons,
   }));
 
   const randomSeed = Math.random().toString(36).substring(7);
@@ -423,7 +427,7 @@ ${styleProfile ? `Style profile: ${JSON.stringify(styleProfile, null, 2)}` : ''}
 Rules:
 - Each outfit needs at least a top + bottom (or dress)
 - Match weather appropriately
-- Prioritise items not worn recently (lastWornAt is older or null)
+- Prioritise items not worn recently (lastWornAt is older or null). Honor the style profile rotationDays when there are enough alternatives; explain necessary repeats. Use fit and visible proportions for silhouettes, and music/personality/hobbies only as user-provided inspiration.
 - Items must actually be in the wardrobe (use real IDs)
 - Consider colour coordination
 - Ensure color and contrast choices flatter the style profile when provided
@@ -453,6 +457,7 @@ export interface TripPlan {
     name: string;
     category: string;
     reason: string;
+    pairWithItemIds?: string[];
   }>;
 }
 
@@ -476,6 +481,7 @@ export async function generateTripPlan(params: {
 - Skin Tone / Undertone: ${styleProfile.skinTone ?? 'unknown'} (${styleProfile.undertone ?? 'unknown'} undertone)
 - Contrast Level: ${styleProfile.contrast ?? 'unknown'}
 - Dressing Preference / Gender Expression: ${styleProfile.gender ?? 'unknown'}
+- Additional user-provided fit, build, interests and rotation preferences: ${JSON.stringify(styleProfile)}. Respect these preferences without stereotyping personality or music taste.
 - Style Aesthetic: Sophisticated, harmonized color coordination, structured and high-quality styling.`
     : '';
 
@@ -500,7 +506,8 @@ Your styling instructions are:
 2. **Personalized Color Theory**: Utilize the user's style profile (especially skin tone, undertone, and contrast level) to choose flattering garment colors from their wardrobe. Match warm undertones with earth/warm tones, cool undertones with cool/jewel tones, and contrast level for bold vs. monochromatic coordination.
 3. **Daily Outfits**: For each day of the trip, curate a complete stylish daily outfit using items from the wardrobe. Ensure the color coordination and silhouette are highly elegant. Provide a clear, stylish, and professional 'rationale' explaining the styling synergy, color theory, and why the look is perfect for the destination's vibe.
 4. **Completeness**: Return exactly one daily outfit for EVERY calendar day from ${startDate} through ${endDate}, inclusive, numbered consecutively starting at 1. Only use exact item IDs from the supplied wardrobe; never invent IDs. Include every daily outfit item in packingList.
-5. **Suggested Additions**: Recommend 1 to 3 items that are NOT in their wardrobe but are absolute must-haves to elevate their looks and complete their travel wardrobe. Provide highly specific styling advice for each suggestion, describing exactly how it coordinates with their existing wardrobe items to create high-end, elegant outfits.
+5. **Pairings**: For every suggested addition, return pairWithItemIds containing 1 to 3 exact owned wardrobe IDs and explain concretely how the pieces pair.
+6. **Suggested Additions**: Recommend 1 to 3 items that are NOT in their wardrobe but are absolute must-haves to elevate their looks and complete their travel wardrobe. Provide highly specific styling advice for each suggestion, describing exactly how it coordinates with their existing wardrobe items to create high-end, elegant outfits.
 
 Return ONLY a JSON object with this exact shape:
 {
@@ -519,6 +526,7 @@ Return ONLY a JSON object with this exact shape:
     {
       "name": "E.g., Beige Linen Blazer",
       "category": "outerwear",
+      "pairWithItemIds": ["exact-existing-item-id"],
       "reason": "An elegant layering piece that adds structured sophistication. Elevates your daily denim look and matches perfectly with your white shirt."
     }
   ]
@@ -753,3 +761,15 @@ Return JSON only, no markdown formatting or extra text.`
   return parseJsonResponse<WeeklyOutfitDay[]>(text);
 }
 
+
+export async function analyzeBuildPhoto(filePath:string){
+  const model=getGeminiModel('gemini-2.5-flash',{responseMimeType:'application/json',temperature:.2});
+  const response=await model.generateContent([{inlineData:{mimeType:'image/jpeg',data:fs.readFileSync(filePath).toString('base64')}},{text:'Provide neutral clothing silhouette guidance from this voluntarily supplied photo. Assess only visible shoulder/waist/hip proportions of the fully clothed person. Do not identify the person or infer age, gender, ethnicity, personality, health, fitness, weight, or numerical measurements. If a full clothed body is not clearly visible, set clear=false, proportions="Not clear", and explain briefly what photo is needed. Otherwise set clear=true and proportions to one of Balanced, Shoulder-led, Hip-led, Defined waist, Straight silhouette. Return JSON only: {clear:boolean,proportions:string,guidance:string}. Keep guidance under 300 characters and use neutral, respectful language.'}]);
+  return parseJsonResponse<{clear:boolean,proportions:string,guidance:string}>(response.response.text());
+}
+
+export async function pairWardrobeIdea(idea:unknown,wardrobe:unknown[],profile:unknown){
+ const model=getGeminiModel('gemini-2.5-flash',{responseMimeType:'application/json',temperature:.4});
+ const result=await model.generateContent(`Style this proposed addition with 2 to 3 complementary pieces from the supplied owned wardrobe. Select an actual coherent outfit, not several alternatives of the same category. Only use exact IDs from this wardrobe; the proposed addition is not yet owned. Explain the color/silhouette combination in one short sentence. User preferences: ${JSON.stringify(profile)}. Proposed addition: ${JSON.stringify(idea)}. Wardrobe: ${JSON.stringify(wardrobe)}. Return JSON only: {"pairWithItemIds":["owned-id"],"reason":"How these exact pieces pair"}.`);
+ return parseJsonResponse<{pairWithItemIds:string[],reason:string}>(result.response.text());
+}

@@ -3,9 +3,10 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+import { validateBuildGuidance } from '../services/build_guidance';
 import sharp from 'sharp';
 import axios from 'axios';
-import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches } from '../services/claude_service';
+import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches, analyzeBuildPhoto } from '../services/claude_service';
 import { prisma } from '../lib/prisma';
 import { uploadBufferToSupabase, uploadLocalFileToSupabase } from '../lib/supabase';
 
@@ -18,6 +19,8 @@ async function resizeImageInPlace(filePath: string, maxWidth = 1024, maxHeight =
   try {
     const tempPath = `${filePath}_temp`;
     await sharp(filePath)
+      .rotate()
+      .flatten({background:'#ffffff'})
       .resize({ width: maxWidth, height: maxHeight, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toFile(tempPath);
@@ -225,6 +228,16 @@ function handleSingleImageUpload(req: Request, res: Response, next: () => void) 
   });
 }
 
+clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,res,next),async(req,res)=>{
+  if(!req.file)return res.status(400).json({error:'Choose a full-body photo.'});
+  try{
+    await resizeImageInPlace(req.file.path);
+    const result=await analyzeBuildPhoto(req.file.path);
+    return res.json(validateBuildGuidance(result));
+  }catch{return res.status(502).json({error:'Could not assess this photo. You can use measurements instead.'});}
+  finally{fs.unlink(req.file.path,()=>undefined);fs.unlink(req.file.path+'_temp',()=>undefined);}
+});
+
 // POST /api/clothing/upload
 // Accepts multipart/form-data with field "image"
 clothingRouter.post('/upload', (req: Request, res: Response, next) => {
@@ -253,39 +266,8 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
     // 4. Return the extracted tags and rawImageUrl to the client immediately (UX: fast response!)
     res.json({ ...tags, imageUrl: rawImageUrl });
 
-    // 5. Trigger generative catalog-style AI enhancement in the background
-    const uploadedFilePath = req.file.path;
-    const category = tags.category;
-    const colors = tags.colors;
-    const style = tags.style;
-    const name = tags.name;
-
-    (async () => {
-      try {
-        const enhancedImageUrl = await generateFullGarmentImage(uploadedFilePath, {
-          category,
-          colors,
-          style,
-          name,
-        });
-
-        if (enhancedImageUrl) {
-          // Cache the mapping so future saves can swap the raw URL for the enhanced URL
-          enhancedImageCache.set(rawImageUrl, enhancedImageUrl);
-
-          // Update any database records matching rawImageUrl that have already been saved
-          await prisma.clothingItem.updateMany({
-            where: { imageUrl: rawImageUrl },
-            data: { imageUrl: enhancedImageUrl },
-          });
-        }
-      } catch (backgroundErr) {
-        console.error('Background generative image enhancement failed:', backgroundErr);
-      } finally {
-        // Always clean up the uploaded temporary file once processing completes
-        fs.unlink(uploadedFilePath, () => undefined);
-      }
-    })();
+    // Preserve the real garment. Background cutouts are display-only on-device.
+    fs.unlink(req.file.path,()=>undefined);
 
   } catch (err) {
     // Clean up the uploaded file on processing failure

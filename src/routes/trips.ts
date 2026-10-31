@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { dayChange,packingAfterDayChange } from '../services/trip_editing';
 import { prisma } from '../lib/prisma';
-import { generateTripPlan } from '../services/claude_service';
+import { generateTripPlan,pairWardrobeIdea } from '../services/claude_service';
 import { EmailService } from '../services/email_service';
 import { travelDetailsSchema, tripRequestSchema, tripDateRange, validateTripPlan } from '../services/trip_validation';
 
@@ -61,7 +61,7 @@ router.post('/plan', async (req, res) => {
       destination,
       startDate,
       endDate,
-      purpose: parsed.data.travelDetails ? `${purpose}. Transport: ${parsed.data.travelDetails.transport}. Luggage: ${parsed.data.travelDetails.luggage.join(', ') || 'Suggest a compact packing list'}. Reuse pieces across days to keep the packing list practical for these bags.` : purpose,
+      purpose: parsed.data.travelDetails ? `${purpose}. Transport: ${parsed.data.travelDetails.transport}. Luggage: ${parsed.data.travelDetails.luggage.join(', ') || 'Suggest a compact packing list'}. Reuse pieces across days to keep the packing list practical for these bags. Target no more than ${parsed.data.travelDetails.maxPieces??20} unique pieces.` : purpose,
       homeCity,
       wardrobe: wardrobe.map(i => ({
         id: i.id,
@@ -77,7 +77,7 @@ router.post('/plan', async (req, res) => {
       styleProfile,
     });
 
-    const plan = validateTripPlan(generated, wardrobe.map(item => item.id), dates.days);
+    const plan = validateTripPlan(generated, wardrobe.map(item => item.id), dates.days,parsed.data.travelDetails?.maxPieces);
 
     if(parsed.data.travelDetails && plan.dailyOutfits.length) (plan.dailyOutfits[0] as any).travelDetails=parsed.data.travelDetails;
     const trip = await prisma.trip.create({
@@ -195,9 +195,29 @@ router.post('/plan', async (req, res) => {
     });
 
   } catch (error) {
+    if(error instanceof Error && error.message.includes('packing target'))return res.status(422).json({error:error.message});
     console.error('Error planning trip:', error);
     res.status(500).json({ error: 'Failed to generate trip plan' });
   }
+});
+
+router.post('/:id/ideas/:index/pairings',async(req,res)=>{
+ try{
+  const uid=req.user?.uid;if(!uid)return res.status(401).json({error:'Unauthorized'});
+  const index=Number(req.params.index);if(!Number.isInteger(index)||index<0)return res.status(400).json({error:'Choose a valid idea.'});
+  const trip=await prisma.trip.findFirst({where:{id:req.params.id,userId:uid}});if(!trip)return res.status(404).json({error:'Trip not found.'});
+  const ideas=JSON.parse(trip.suggestedAdditions||'[]');if(index>=ideas.length)return res.status(404).json({error:'Idea not found.'});
+  const wardrobe=await prisma.clothingItem.findMany({where:{userId:uid}});
+  if(!wardrobe.length)return res.status(400).json({error:'Add clothing to your closet first.'});
+  const pairing=await pairWardrobeIdea(ideas[index],wardrobe.map(i=>({id:i.id,name:i.name,category:i.category,colors:JSON.parse(i.colors),style:i.style})),req.body?.styleProfile);
+  const owned=new Set(wardrobe.map(i=>i.id));
+  if(!Array.isArray(pairing.pairWithItemIds)||!pairing.pairWithItemIds.length||pairing.pairWithItemIds.some(id=>!owned.has(id))||typeof pairing.reason!=='string')return res.status(502).json({error:'Could not match this idea to saved pieces. Try again.'});
+  ideas[index]={...ideas[index],pairWithItemIds:[...new Set(pairing.pairWithItemIds)].slice(0,3),reason:pairing.reason.slice(0,800)};
+  const changed=await prisma.trip.updateMany({where:{id:trip.id,userId:uid,suggestedAdditions:trip.suggestedAdditions},data:{suggestedAdditions:JSON.stringify(ideas)}});
+  if(!changed.count)return res.status(409).json({error:'The trip changed. Reopen it and try again.'});
+  const saved=await prisma.trip.findUniqueOrThrow({where:{id:trip.id}});
+  return res.json({...saved,dailyOutfits:JSON.parse(saved.dailyOutfits),packingList:JSON.parse(saved.packingList),suggestedAdditions:ideas});
+ }catch{return res.status(500).json({error:'Could not create a wardrobe pairing. Please try again.'});}
 });
 
 router.patch('/:id/travel',async(req,res)=>{

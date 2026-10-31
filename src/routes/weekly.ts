@@ -18,6 +18,7 @@ const weeklySchema = z.object({
       contrast: z.string().max(64).nullable().optional(),
       gender: z.string().max(32).nullable().optional(),
     })
+    .passthrough()
     .nullable()
     .optional(),
 });
@@ -60,7 +61,7 @@ weeklyRouter.post('/weekly', async (req: Request, res: Response) => {
       occasion,
       weather,
       wardrobe,
-      styleProfile: styleProfile || undefined,
+      styleProfile:styleProfile||undefined,
     });
     return res.json(suggestions);
   } catch (err) {
