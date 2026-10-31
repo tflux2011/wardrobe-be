@@ -1,3 +1,4 @@
+import { appUrl, escapeHtml, packingEmailHtml, itineraryEmailHtml } from '../services/email_templates';
 import {generateValidatedTrip, TripGenerationError} from '../services/trip_generation';
 import { Router } from 'express';
 import { dayChange,packingAfterDayChange } from '../services/trip_editing';
@@ -93,87 +94,23 @@ router.post('/plan', async (req, res) => {
       },
     });
 
-    // Helper functions to render email tables matching flat solid Luxury Brand styling
-    const buildPackingListHtml = (packingItemIds: string[], wardrobeItems: any[]) => {
-      let rowsHtml = '';
-      for (const itemId of packingItemIds) {
-        const item = wardrobeItems.find(w => w.id === itemId);
-        if (item) {
-          const colors = JSON.parse(item.colors).join(', ');
-          rowsHtml += `
-            <tr>
-              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; font-weight: 600;">${item.name}</td>
-              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; text-transform: uppercase;">${item.category}</td>
-              <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; font-style: italic;">${colors} // ${item.style}</td>
-            </tr>
-          `;
-        }
-      }
-      return `
-        <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
-          <thead>
-            <tr>
-              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Garment Name</th>
-              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Category</th>
-              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml || '<tr><td colspan="3" style="padding: 10px 8px; font-size: 13px; text-align: center; color: #8F8C88;">No items added to packing list</td></tr>'}
-          </tbody>
-        </table>
-      `;
-    };
-
-    const buildItineraryHtml = (dailyOutfits: any[], wardrobeItems: any[]) => {
-      let rowsHtml = '';
-      for (const dayInfo of dailyOutfits) {
-        const day = dayInfo.day;
-        const outfit = dayInfo.outfit;
-        const itemNames = outfit.itemIds
-          .map((itemId: string) => wardrobeItems.find(w => w.id === itemId)?.name)
-          .filter(Boolean)
-          .join(' + ');
-
-        rowsHtml += `
-          <tr>
-            <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC; font-weight: bold;">Day ${day} // ${outfit.name || 'Outfit'}</td>
-            <td style="padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #E5E2DC;">
-              <div style="font-weight: 600; margin-bottom: 4px; color: #060097;">${itemNames}</div>
-              <div style="font-size: 11px; color: #524E4A; line-height: 1.4;">${outfit.rationale}</div>
-            </td>
-          </tr>
-        `;
-      }
-      return `
-        <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
-          <thead>
-            <tr>
-              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Day & Coordinate</th>
-              <th style="text-align: left; font-size: 9px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px; background-color: #F5F1E9; border-bottom: 1px solid #060097;">Styling Blueprint</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml || '<tr><td colspan="2" style="padding: 10px 8px; font-size: 13px; text-align: center; color: #8F8C88;">No daily plans generated</td></tr>'}
-          </tbody>
-        </table>
-      `;
-    };
-
     // Dispatch the trip digest email in the background
     if (req.user?.email) {
       const email = req.user.email;
       prisma.emailTemplate.findUnique({
         where: { id: 'trip_digest' }
       }).then(async (tripTemplate) => {
-        const subjectTemplate = tripTemplate?.subject || 'Atelier Travel Blueprint // Curation for {{destination}}';
-        const bodyTemplate = tripTemplate?.body || EmailService.getDefaultTemplates().trip_digest.body;
+        const template = EmailService.resolveTemplate('trip_digest', tripTemplate);
+        const subjectTemplate = template.subject;
+        const bodyTemplate = template.body;
         
         const subject = EmailService.interpolate(subjectTemplate, { destination });
         const renderedHtml = EmailService.interpolate(bodyTemplate, {
-          destination,
-          packingListHtml: buildPackingListHtml(plan.packingList, wardrobe),
-          itineraryHtml: buildItineraryHtml(plan.dailyOutfits, wardrobe),
+          destination: escapeHtml(destination),
+          dateRange: `${dates.startDate.toLocaleDateString('en-US', {month:'short',day:'numeric',timeZone:'UTC'})} – ${dates.endDate.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric',timeZone:'UTC'})}`,
+          tripUrl: `${appUrl()}/app/trips/${encodeURIComponent(trip.id)}`,
+          packingListHtml: packingEmailHtml(plan.packingList, wardrobe),
+          itineraryHtml: itineraryEmailHtml(plan.dailyOutfits, wardrobe),
         });
 
         const res = await EmailService.sendEmail({

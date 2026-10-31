@@ -35,18 +35,29 @@ export const editOutfitImage: ImageEditor = async (prompt, images) => {
   return image;
 };
 
-export async function generateReferencedOutfit(
-  garments: GarmentReference[], styling: string, presentation: string,
-  editor: ImageEditor = editOutfitImage,
-) {
+async function prepare(garments: GarmentReference[], styling: string, presentation: string) {
   if (garments.length === 0 || garments.length > 12 || new Set(garments.map(g => g.id)).size !== garments.length) {
     throw new Error('Select between one and twelve unique garments.');
   }
   const images = await Promise.all(garments.map(g => referenceImage(g.imageUrl)));
   const list = garments.map((g, i) => `Reference ${i + 1}: ${g.category} — ${g.name}`).join('\n');
   const rules = `Create ONE full-body faceless retail mannequin wearing exactly the garments in the supplied photographs.\n${list}\nThe photographs are the source of truth. Preserve their colors, patterns, material, sleeve lengths, collars, closures, fit, footwear and accessory details. Transfer these pieces onto the mannequin; do not invent a new outfit, add garments, substitute colors, or treat references as inspiration. Naturally layer the selected pieces. Keep accessories at realistic scale. Do not copy photograph backgrounds, hangers, people, or display stands. White studio background, soft natural lighting, entire mannequin head-to-toe visible, no text, collage or extra mannequins. Presentation and proportions: ${presentation}. Styling notes are subordinate to photograph accuracy: ${styling}`;
-  const front = await editor(`${rules}\nView: FRONT, facing the camera.`, images);
-  // The back is an edit of the front, with the originals retained as references.
-  const back = await editor(`${rules}\nThe FIRST image is the completed FRONT view. Subsequent images are the same garment references in the order listed. Rotate that SAME dressed mannequin 180 degrees to show its BACK. Keep the same outfit, body, colors, materials and lighting. Infer only unseen back details conservatively; do not invent prints, logos or embellishments.`, [`data:image/png;base64,${front}`, ...images]);
+  return { images, rules };
+}
+export async function generateOutfitView(
+  garments: GarmentReference[], styling: string, presentation: string,
+  view: 'front' | 'back', front?: string, editor: ImageEditor = editOutfitImage,
+) {
+  const {images,rules}=await prepare(garments,styling,presentation);
+  if(view==='front') return editor(`${rules}\nView: FRONT, facing the camera.`, images);
+  if(!front) throw new Error('Create the front preview first.');
+  return editor(`${rules}\nThe FIRST image is the completed FRONT view. Subsequent images are the same garment references in the order listed. Rotate that SAME dressed mannequin 180 degrees to show its BACK. Keep the same outfit, body, colors, materials and lighting. Infer only unseen back details conservatively; do not invent prints, logos or embellishments.`, [`data:image/png;base64,${front}`, ...images]);
+}
+export async function generateReferencedOutfit(
+  garments: GarmentReference[], styling: string, presentation: string,
+  editor: ImageEditor = editOutfitImage,
+) {
+  const front=await generateOutfitView(garments,styling,presentation,'front',undefined,editor);
+  const back=await generateOutfitView(garments,styling,presentation,'back',front,editor);
   return { front, back, model: process.env.OPENAI_OUTFIT_IMAGE_MODEL || 'gpt-image-2', referenceItemIds: garments.map(g => g.id), generationVersion: 'photo-references-v2' };
 }

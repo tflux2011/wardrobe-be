@@ -1,3 +1,4 @@
+import { escapeHtml } from '../services/email_templates';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
@@ -24,11 +25,12 @@ async function ensureUser(uid: string, email?: string | null) {
           where: { id: 'welcome' }
         });
         
-        const subject = welcomeTemplate?.subject || 'Welcome to Clad Atelier // Closet Calibration Initiated';
-        const bodyTemplate = welcomeTemplate?.body || EmailService.getDefaultTemplates().welcome.body;
+        const template = EmailService.resolveTemplate('welcome', welcomeTemplate);
+        const subject = template.subject;
+        const bodyTemplate = template.body;
         
         const renderedHtml = EmailService.interpolate(bodyTemplate, {
-          userName: email.split('@')[0],
+          userName: escapeHtml(email.split('@')[0]),
         });
 
         EmailService.sendEmail({

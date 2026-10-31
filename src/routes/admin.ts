@@ -204,7 +204,7 @@ adminRouter.get('/emails', async (req, res) => {
     return res.json(seeded);
   }
 
-  res.json(templates);
+  res.json(templates.map(t => ({ ...t, ...EmailService.resolveTemplate(t.id, t) })));
 });
 
 // PUT /api/admin/emails/:id - Update dynamic template
@@ -233,13 +233,15 @@ adminRouter.post('/emails/:id/test', async (req, res) => {
     throw new ApiError(400, 'Valid test email address is required');
   }
 
-  const template = await prisma.emailTemplate.findUnique({
+  const storedTemplate = await prisma.emailTemplate.findUnique({
     where: { id }
   });
 
-  if (!template) {
+  if (!storedTemplate) {
     throw new ApiError(404, `Template with ID '${id}' not found`);
   }
+
+  const template = { ...storedTemplate, ...EmailService.resolveTemplate(id as string, storedTemplate) };
 
   // Render template using realistic mock details
   let renderedHtml = template.body;
@@ -250,6 +252,8 @@ adminRouter.post('/emails/:id/test', async (req, res) => {
   } else if (id === 'trip_digest') {
     renderedHtml = EmailService.interpolate(template.body, {
       destination: 'Paris, France',
+      dateRange: 'Dec 4 – Dec 7, 2026',
+      tripUrl: 'https://clad.style/app/trips',
       packingListHtml: `
         <table class="table-list" style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
           <thead>

@@ -1,3 +1,4 @@
+import { appUrl, passwordResetEmail } from '../services/email_templates';
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
@@ -44,46 +45,11 @@ userRouter.post('/forgot-password', async (req: Request, res: Response) => {
     });
 
     // 4. Construct reset landing page link
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = appUrl();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     // 5. Send sand-linen styled email
-    const subject = 'Atelier Security Coordinate // Password Reset Link';
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FDFBF7; color: #524E4A; margin: 0; padding: 40px 20px; }
-    .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #060097; padding: 40px; }
-    .header { font-size: 10px; font-weight: bold; color: #D25C34; letter-spacing: 0.15em; margin-bottom: 24px; text-transform: uppercase; }
-    h1 { font-size: 24px; font-weight: 300; color: #060097; margin: 0 0 20px 0; letter-spacing: 0.02em; }
-    p { font-size: 14px; line-height: 1.6; margin: 0 0 20px 0; }
-    .highlight-box { background-color: #F5F1E9; border: 1px solid #060097; padding: 24px; margin-bottom: 32px; }
-    .highlight-box h2 { font-size: 11px; font-weight: bold; color: #060097; margin: 0 0 12px 0; letter-spacing: 0.08em; }
-    .btn { display: inline-block; background-color: #060097; color: #FFFFFF !important; text-decoration: none; padding: 12px 24px; font-size: 10px; font-weight: bold; letter-spacing: 0.1em; border-radius: 0px; text-transform: uppercase; }
-    .footer { font-size: 9px; color: #8F8C88; margin-top: 40px; border-top: 1px solid #E5E2DC; padding-top: 20px; letter-spacing: 0.05em; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">CLAD ATELIER // ACCOUNT RECOVERY</div>
-    <h1>Reset Your Password</h1>
-    <p>We received a request to reset the password associated with your digital showroom coordinates. Click the link below to establish a new password and resume closet calibration.</p>
-    
-    <div class="highlight-box">
-      <h2>SECURITY DIRECTIVE</h2>
-      <p style="margin-bottom:0; font-size:13px; line-height:1.5;">This password reset coordinate link is only valid for <strong>1 hour</strong>. If you did not initiate this request, you can safely ignore this email; your showroom credentials remain secure.</p>
-    </div>
-    
-    <a href="${resetUrl}" class="btn" style="color: #FFFFFF !important;">Reset Password</a>
-    
-    <div class="footer">
-      ATELIER SECURITY LEDGER // AUTONOMOUS SECURITY SYNC
-    </div>
-  </div>
-</body>
-</html>`;
+    const {subject, html} = passwordResetEmail(resetUrl);
 
     await EmailService.sendEmail({ to: cleanEmail, subject, html });
 

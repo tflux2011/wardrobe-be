@@ -5,7 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
-import { generateReferencedOutfit } from '../services/outfit_image_service';
+import { PreviewCache } from '../services/preview_cache';
+import { generateReferencedOutfit, generateOutfitView } from '../services/outfit_image_service';
 
 const PERMANENT_DIR = path.join(__dirname, '..', '..', 'uploads', 'permanent');
 if (!fs.existsSync(PERMANENT_DIR)) {
@@ -20,9 +21,12 @@ function saveImageToDisk(base64: string): string {
 }
 
 export const imagesRouter = Router();
+const previews = new PreviewCache();
 
 const imageSchema = z.object({
   prompt: z.string().min(8).max(2000),
+  view: z.enum(['front', 'back']).optional(),
+  frontPreviewId: z.string().uuid().optional(),
   wardrobeContext: z.array(z.record(z.any())).optional().default([]),
   styleProfile: z
     .object({
@@ -275,6 +279,19 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
     if (items.length !== ids.length) return res.status(422).json({ error: 'Some selected pieces are unavailable. Sync your closet and try again.' });
     const ordered = ids.map(id => items.find(item => item.id === id)!);
     if (ordered.some(item => !item.imageUrl)) return res.status(422).json({ error: 'Every selected piece needs a photograph before creating a mannequin preview.' });
+    if (parsed.data.view) {
+      const fingerprint = crypto.createHash('sha256').update(JSON.stringify([
+        uid, ordered.map(p => [p.id,p.name,p.category,p.imageUrl]), parsed.data.prompt,
+        parsed.data.styleProfile ?? {}, process.env.OPENAI_OUTFIT_IMAGE_MODEL || 'gpt-image-2', 'photo-references-v3',
+      ])).digest('hex');
+      const view = parsed.data.view;
+      const result = await previews.generate(fingerprint, view, async front => {
+        const frontBytes = front ? (await fs.promises.readFile(path.join(__dirname, '../..', front.imageUrl))).toString('base64') : undefined;
+        const image = await generateOutfitView(ordered, parsed.data.prompt, JSON.stringify(parsed.data.styleProfile ?? {}), view, frontBytes);
+        return { imageUrl: saveImageToDisk(image), mimeType: 'image/png' };
+      }, parsed.data.frontPreviewId);
+      return res.json({ ...result, referenceItemIds: ids, generationVersion: 'photo-references-v3' });
+    }
     const result = await generateReferencedOutfit(ordered, parsed.data.prompt,
       JSON.stringify(parsed.data.styleProfile ?? {}));
     return res.json({
@@ -283,6 +300,8 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
       model: result.model, referenceItemIds: result.referenceItemIds, generationVersion: result.generationVersion,
     });
   } catch (error) {
+    if (error instanceof Error && error.message === 'FRONT_PREVIEW_EXPIRED') return res.status(409).json({error:'This preview expired. Open the outfit again to create a fresh front view.'});
+    if (error instanceof Error && error.message === 'PREVIEW_BUSY') return res.status(429).json({error:'The mannequin studio is busy. Please try again shortly.'});
     const status = axios.isAxiosError(error) ? error.response?.status : undefined;
     console.error('[images/outfit] Reference-based generation failed', { status });
     return res.status(502).json({ error: status === 401 || status === 403

@@ -63,7 +63,7 @@ test('route loads only owned records and returns confirmed photo references', as
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const url = `http://127.0.0.1:${(server.address() as any).port}/outfit/reference`;
-  const request = () => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'An outfit preview', wardrobeContext: [{ id: 'shirt', imageUrl: 'https://untrusted.example/wrong-shirt.png' }] }) });
+  const request = (view?: 'front' | 'back', frontPreviewId?: string) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ view, frontPreviewId, prompt: 'An outfit preview', wardrobeContext: [{ id: 'shirt', imageUrl: 'https://untrusted.example/wrong-shirt.png' }] }) });
   try {
     const response = await request();
     assert.equal(response.status, 200);
@@ -73,9 +73,20 @@ test('route loads only owned records and returns confirmed photo references', as
     assert.deepEqual(calls[0].images, [{ image_url: 'https://storage.example/actual-shirt.png' }]);
     assert.equal(calls[1].images[0].image_url, 'data:image/png;base64,dGVzdA==');
     for (const view of ['front', 'back']) await fs.unlink(path.join(__dirname, '..', data[view].imageUrl));
+    const first = await (await request('front')).json() as any;
+    assert.equal(calls.length, 3);
+    assert.equal(first.front.imageBase64, undefined);
+    assert.equal(first.back, undefined);
+    const cached = await (await request('front')).json() as any;
+    assert.equal(cached.front.imageUrl, first.front.imageUrl);
+    assert.equal(calls.length, 3);
+    const back = await (await request('back', first.previewId)).json() as any;
+    assert.equal(calls.length, 4);
+    assert.equal(calls[3].images[0].image_url, 'data:image/png;base64,dGVzdA==');
+    for (const view of [first.front, back.back]) await fs.unlink(path.join(__dirname, '..', view.imageUrl));
     available = false;
-    assert.equal((await request()).status, 422);
-    assert.equal(calls.length, 2);
+    assert.equal((await request('front')).status, 422);
+    assert.equal(calls.length, 4);
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
