@@ -1,8 +1,9 @@
 import { Router } from 'express';
+import { dayChange,packingAfterDayChange } from '../services/trip_editing';
 import { prisma } from '../lib/prisma';
 import { generateTripPlan } from '../services/claude_service';
 import { EmailService } from '../services/email_service';
-import { tripRequestSchema, tripDateRange, validateTripPlan } from '../services/trip_validation';
+import { travelDetailsSchema, tripRequestSchema, tripDateRange, validateTripPlan } from '../services/trip_validation';
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.post('/plan', async (req, res) => {
       destination,
       startDate,
       endDate,
-      purpose,
+      purpose: parsed.data.travelDetails ? `${purpose}. Transport: ${parsed.data.travelDetails.transport}. Luggage: ${parsed.data.travelDetails.luggage.join(', ') || 'Suggest a compact packing list'}. Reuse pieces across days to keep the packing list practical for these bags.` : purpose,
       homeCity,
       wardrobe: wardrobe.map(i => ({
         id: i.id,
@@ -78,6 +79,7 @@ router.post('/plan', async (req, res) => {
 
     const plan = validateTripPlan(generated, wardrobe.map(item => item.id), dates.days);
 
+    if(parsed.data.travelDetails && plan.dailyOutfits.length) (plan.dailyOutfits[0] as any).travelDetails=parsed.data.travelDetails;
     const trip = await prisma.trip.create({
       data: {
         userId: uid,
@@ -196,6 +198,53 @@ router.post('/plan', async (req, res) => {
     console.error('Error planning trip:', error);
     res.status(500).json({ error: 'Failed to generate trip plan' });
   }
+});
+
+router.patch('/:id/travel',async(req,res)=>{
+  try{
+    const uid=req.user?.uid;if(!uid)return res.status(401).json({error:'Unauthorized'});
+    const parsed=travelDetailsSchema.safeParse(req.body);if(!parsed.success)return res.status(400).json({error:'Choose valid luggage and transport details.'});
+    const trip=await prisma.trip.findFirst({where:{id:req.params.id,userId:uid}});if(!trip)return res.status(404).json({error:'Trip not found.'});
+    const days=JSON.parse(trip.dailyOutfits);if(!days.length)return res.status(400).json({error:'This trip has no saved itinerary.'});
+    days[0]={...days[0],travelDetails:parsed.data};
+    const result=await prisma.trip.updateMany({where:{id:trip.id,userId:uid,dailyOutfits:trip.dailyOutfits},data:{dailyOutfits:JSON.stringify(days)}});
+    if(!result.count)return res.status(409).json({error:'This trip changed elsewhere. Refresh it and try again.'});
+    return res.json({...trip,dailyOutfits:days,packingList:JSON.parse(trip.packingList),suggestedAdditions:JSON.parse(trip.suggestedAdditions||'[]')});
+  }catch{return res.status(500).json({error:'Could not save travel details.'});}
+});
+
+// Change one day without regenerating the rest of the journey or sending a digest.
+router.patch('/:id/days/:index', async (req,res) => {
+  try {
+    const uid=req.user?.uid;
+    if(!uid)return res.status(401).json({error:'Unauthorized'});
+    const parsed=dayChange.safeParse(req.body),index=Number(req.params.index);
+    if(!parsed.success || !Number.isInteger(index) || index<0)return res.status(400).json({error:'Choose a valid day and pieces.'});
+    const trip=await prisma.trip.findFirst({where:{id:req.params.id,userId:uid}});
+    if(!trip)return res.status(404).json({error:'Trip not found.'});
+    const days=JSON.parse(trip.dailyOutfits);
+    if(index>=days.length)return res.status(400).json({error:'Day not found.'});
+    const wardrobe=await prisma.clothingItem.findMany({where:{userId:uid}});
+    const owned=new Set(wardrobe.map(i=>i.id));
+    if(parsed.data.itemIds?.some(id=>!owned.has(id)))return res.status(400).json({error:'Choose pieces from your current closet.'});
+    const previous=days[index].outfit ?? days[index];
+    let outfit={...previous};
+    if(parsed.data.itemIds){
+      outfit={...outfit,itemIds:[...new Set(parsed.data.itemIds)],rationale:'Selected by you from your wardrobe.'};
+      delete outfit.perfume;
+    } else {
+      const date=new Date(trip.startDate);date.setUTCDate(date.getUTCDate()+index);
+      const generated=await generateTripPlan({destination:trip.destination,startDate:date.toISOString(),endDate:date.toISOString(),purpose:`${parsed.data.occasion}. This is one day of a trip for ${trip.purpose}. Transport and luggage: ${JSON.stringify(days[0]?.travelDetails??{})}. Prefer pieces already packed: ${trip.packingList}.`,styleProfile:parsed.data.styleProfile,wardrobe:wardrobe.map(i=>({...i,colors:JSON.parse(i.colors),occasions:JSON.parse(i.occasions),seasons:JSON.parse(i.seasons),tags:JSON.parse(i.tags)}))});
+      outfit=validateTripPlan(generated,wardrobe.map(i=>i.id),1).dailyOutfits[0].outfit;
+    }
+    if(parsed.data.occasion)outfit.occasion=parsed.data.occasion;
+    const previousDays=JSON.parse(trip.dailyOutfits);
+    days[index]={...days[index],outfit};
+    const packing=packingAfterDayChange(previousDays,days,JSON.parse(trip.packingList));
+    const changed=await prisma.trip.updateMany({where:{id:trip.id,userId:uid,dailyOutfits:trip.dailyOutfits},data:{dailyOutfits:JSON.stringify(days),packingList:JSON.stringify(packing)}});
+    if(!changed.count)return res.status(409).json({error:'This trip changed elsewhere. Refresh it and try again.'});
+    return res.json({...trip,dailyOutfits:days,packingList:packing,suggestedAdditions:JSON.parse(trip.suggestedAdditions||'[]')});
+  } catch(error){console.error('Day update failed:',error);return res.status(500).json({error:'Could not update this day. Your previous plan is unchanged.'});}
 });
 
 // DELETE a trip

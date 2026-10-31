@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
+export const travelDetailsSchema=z.object({transport:z.enum(['Not decided','Flying','Train','Car','Bus','Other']),luggage:z.array(z.enum(['Personal item','Carry-on','Checked suitcase','Backpack','Weekend bag'])).max(5)});
+
 export const tripRequestSchema = z.object({
+  travelDetails: travelDetailsSchema.optional(),
   destination: z.string().trim().min(2).max(200),
   homeCity: z.string().trim().max(200).optional(),
   purpose: z.string().trim().min(1).max(500),
