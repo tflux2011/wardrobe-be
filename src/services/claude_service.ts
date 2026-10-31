@@ -499,7 +499,8 @@ Your styling instructions are:
 1. **Sophistication & Cohesion**: Do not recommend generic or basic outfits. Design highly cohesive, fashionable, and aesthetic looks that match the local climate and fashion culture of ${destination} for the purpose of a ${purpose} trip.
 2. **Personalized Color Theory**: Utilize the user's style profile (especially skin tone, undertone, and contrast level) to choose flattering garment colors from their wardrobe. Match warm undertones with earth/warm tones, cool undertones with cool/jewel tones, and contrast level for bold vs. monochromatic coordination.
 3. **Daily Outfits**: For each day of the trip, curate a complete stylish daily outfit using items from the wardrobe. Ensure the color coordination and silhouette are highly elegant. Provide a clear, stylish, and professional 'rationale' explaining the styling synergy, color theory, and why the look is perfect for the destination's vibe.
-4. **Suggested Additions**: Recommend 1 to 3 items that are NOT in their wardrobe but are absolute must-haves to elevate their looks and complete their travel wardrobe. Provide highly specific styling advice for each suggestion, describing exactly how it coordinates with their existing wardrobe items to create high-end, elegant outfits.
+4. **Completeness**: Return exactly one daily outfit for EVERY calendar day from ${startDate} through ${endDate}, inclusive, numbered consecutively starting at 1. Only use exact item IDs from the supplied wardrobe; never invent IDs. Include every daily outfit item in packingList.
+5. **Suggested Additions**: Recommend 1 to 3 items that are NOT in their wardrobe but are absolute must-haves to elevate their looks and complete their travel wardrobe. Provide highly specific styling advice for each suggestion, describing exactly how it coordinates with their existing wardrobe items to create high-end, elegant outfits.
 
 Return ONLY a JSON object with this exact shape:
 {

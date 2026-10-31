@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { generateTripPlan } from '../services/claude_service';
 import { EmailService } from '../services/email_service';
+import { tripRequestSchema, tripDateRange, validateTripPlan } from '../services/trip_validation';
 
 const router = Router();
 
@@ -38,11 +39,13 @@ router.post('/plan', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { destination, startDate, endDate, purpose, homeCity, styleProfile } = req.body;
-    
-    if (!destination || !startDate || !endDate || !purpose) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
+    const parsed = tripRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Add a destination, travel dates, and plans for your trip.' });
+    const { destination, purpose, homeCity, styleProfile } = parsed.data;
+    let dates;
+    try { dates = tripDateRange(parsed.data.startDate, parsed.data.endDate); }
+    catch (error) { return res.status(400).json({ error: (error as Error).message }); }
+    const startDate = dates.startDate.toISOString(), endDate = dates.endDate.toISOString();
 
     // Fetch user's wardrobe
     const wardrobe = await prisma.clothingItem.findMany({
@@ -53,7 +56,7 @@ router.post('/plan', async (req, res) => {
       return res.status(400).json({ error: 'Your closet is empty. Add clothes first.' });
     }
 
-    const plan = await generateTripPlan({
+    const generated = await generateTripPlan({
       destination,
       startDate,
       endDate,
@@ -72,6 +75,8 @@ router.post('/plan', async (req, res) => {
       })),
       styleProfile,
     });
+
+    const plan = validateTripPlan(generated, wardrobe.map(item => item.id), dates.days);
 
     const trip = await prisma.trip.create({
       data: {
@@ -203,7 +208,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    await prisma.trip.delete({
+    await prisma.trip.deleteMany({
       where: { id, userId: uid },
     });
 
