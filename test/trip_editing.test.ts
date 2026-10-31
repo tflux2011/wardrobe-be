@@ -12,7 +12,7 @@ test('unused old pieces leave the packing list after repair',()=>{
 });
 test('day edits reject empty or unsupported requests',()=>{
  assert.equal(dayChange.safeParse({}).success,false);assert.equal(dayChange.safeParse({itemIds:[]}).success,false);
- assert.equal(dayChange.safeParse({occasion:'Dinner'}).success,true);assert.equal(dayChange.safeParse({occasion:'Anything'}).success,false);
+ assert.equal(dayChange.safeParse({occasion:'Dinner'}).success,true);assert.equal(dayChange.safeParse({occasion:'Dinner',styleProfile:null}).success,true);assert.equal(dayChange.safeParse({occasion:'Anything'}).success,false);
 });
 test('transport and luggage selections are bounded and validated',()=>{
  assert.equal(travelDetailsSchema.safeParse({transport:'Flying',luggage:['Carry-on','Personal item']}).success,true);
