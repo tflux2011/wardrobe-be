@@ -1,3 +1,5 @@
+import {workLimit} from '../middleware/work_limit';
+const imageWork=workLimit(2);
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -122,7 +124,7 @@ function handleSingleImageUpload(req: Request, res: Response, next: () => void) 
   });
 }
 
-clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,res,next),async(req,res)=>{
+clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,res,next),imageWork(async(req,res)=>{
   if(!req.file)return res.status(400).json({error:'Choose a full-body photo.'});
   try{
     await resizeImageInPlace(req.file.path);
@@ -130,13 +132,13 @@ clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,r
     return res.json(validateBuildGuidance(result));
   }catch(error){return res.status(error instanceof ApiError?error.statusCode:502).json({error:error instanceof ApiError?error.message:'Could not assess this photo. You can use measurements instead.'});}
   finally{fs.unlink(req.file.path,()=>undefined);fs.unlink(req.file.path+'_temp',()=>undefined);}
-});
+}));
 
 // POST /api/clothing/upload
 // Accepts multipart/form-data with field "image"
 clothingRouter.post('/upload', (req: Request, res: Response, next) => {
   handleSingleImageUpload(req, res, next);
-}, async (req: Request, res: Response) => {
+}, imageWork(async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image file provided' });
   }
@@ -181,13 +183,13 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
 
     return res.status(500).json({ error: 'Failed to analyse image' });
   }
-});
+}));
 
 // POST /api/clothing/split
 // Accepts multipart/form-data with field "image" and returns split+tagged garments.
 clothingRouter.post('/split', (req: Request, res: Response, next) => {
   handleSingleImageUpload(req, res, next);
-}, async (req: Request, res: Response) => {
+}, imageWork(async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image file provided' });
   }
@@ -294,14 +296,14 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
   } finally {
     for(const file of [uploadedPath,...croppedPaths])fs.unlink(file,()=>undefined);
   }
-});
+}));
 
 // POST /api/clothing/match
 // Accepts multipart/form-data with field "image"
 // Tags store garment and recommends top 3 matching items in their closet
 clothingRouter.post('/match', (req: Request, res: Response, next) => {
   handleSingleImageUpload(req, res, next);
-}, async (req: Request, res: Response) => {
+}, imageWork(async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image file provided' });
   }
@@ -367,4 +369,4 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
     console.error('[clothing/match] Processing failed');
     return res.status(500).json({ error: 'Failed to process store item match' });
   }
-});
+}));

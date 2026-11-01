@@ -15,3 +15,6 @@ dist/
 uploads/
 .DS_Store
 /src/generated/prisma
+
+# Firebase Admin credentials are server secrets.
+firebase-service-account*.json

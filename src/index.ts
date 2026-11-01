@@ -34,13 +34,15 @@ const origins=[...new Set(['https://clad.style','https://www.clad.style','http:/
 app.use(cors({origin:(origin,done)=>done(null,!origin||origins.includes(origin)),allowedHeaders:['Authorization','Content-Type','Idempotency-Key']}));
 app.use((_req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');next();});
 app.use(requestLogger);
-app.use(express.json({ limit: '10mb' }));
+app.use('/api', createRateLimiter({windowMs:60000,maxRequests:600}));
+app.use(express.json({ limit: '256kb' }));
 
 // Temporary photos and generated files must never be served as public static assets.
 app.use('/media', createRateLimiter({windowMs:60000,maxRequests:600}), mediaRouter);
 
+app.use((req,res,next)=>{if(req.body?.styleProfile && JSON.stringify(req.body.styleProfile).length>8192){res.status(400).json({error:'Your style preferences are too long. Please shorten them.'});return;}next();});
+
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api', createRateLimiter({windowMs:60000,maxRequests:600}));
 app.use('/api/admin', adminRouter);
 app.use('/api/user', userRouter); // Router handles auth requirements internally
 app.use('/api/wardrobe', requireAuth, apiRateLimiter, signMediaResponses, wardrobeRouter);

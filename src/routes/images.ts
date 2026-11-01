@@ -1,3 +1,5 @@
+import {workLimit} from '../middleware/work_limit';
+const imageWork=workLimit(2);
 import { savePrivatePhoto, privatePhotoBytes, requirePhotoSpace } from '../services/media';
 import { withAllowance, reserve, settle, reserveImageBudget } from '../services/usage';
 import { ApiError } from '../utils/errors';
@@ -65,7 +67,7 @@ function isRetryableModelError(message?: string): boolean {
   );
 }
 
-imagesRouter.post('/inspire', async (req: Request, res: Response) => {
+imagesRouter.post('/inspire', imageWork(async (req: Request, res: Response) => {
   const parsed = imageSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -260,10 +262,10 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
 
     return res.status(500).json({ error: 'Failed to generate inspiration image' });
   } finally {await settle(operation,false);}
-});
+}));
 
 // Resolve references from the signed-in user's wardrobe, never client-supplied URLs.
-imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Response) => {
+imagesRouter.post(['/outfit', '/outfit/reference'], imageWork(async (req: Request, res: Response) => {
   const parsed = imageSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const uid = req.user?.uid;
@@ -315,4 +317,4 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
       : status === 429 ? 'The mannequin generator is busy or has reached its usage limit. Please try again later.'
       : 'Could not create a photo-based mannequin preview. Your original clothing photos are unchanged.' });
   }
-});
+}));
