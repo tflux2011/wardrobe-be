@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase URL or Service Role Key in environment variables');
+let client:ReturnType<typeof createClient>|undefined;
+function getClient(){
+ if(!client){
+  const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if(!url||!key)throw new Error('Missing server storage configuration');
+  client=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+ }
+ return client;
 }
-
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+export const supabase=new Proxy({} as ReturnType<typeof createClient>,{get:(_target,key)=>{
+ const instance=getClient();const value=Reflect.get(instance,key);return typeof value==='function'?value.bind(instance):value;
+}});
 
 import * as fs from 'fs';
 import * as path from 'path';

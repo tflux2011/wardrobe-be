@@ -1,3 +1,6 @@
+import { savePrivatePhoto, privatePhotoBytes } from '../services/media';
+import { withAllowance, reserve, settle, reserveImageBudget } from '../services/usage';
+import { ApiError } from '../utils/errors';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import axios from 'axios';
@@ -8,17 +11,7 @@ import { prisma } from '../lib/prisma';
 import { PreviewCache } from '../services/preview_cache';
 import { generateReferencedOutfit, generateOutfitView } from '../services/outfit_image_service';
 
-const PERMANENT_DIR = path.join(__dirname, '..', '..', 'uploads', 'permanent');
-if (!fs.existsSync(PERMANENT_DIR)) {
-  fs.mkdirSync(PERMANENT_DIR, { recursive: true });
-}
-
-function saveImageToDisk(base64: string): string {
-  const filename = `${crypto.randomUUID()}.png`;
-  const filepath = path.join(PERMANENT_DIR, filename);
-  fs.writeFileSync(filepath, Buffer.from(base64, 'base64'));
-  return `/uploads/permanent/${filename}`;
-}
+async function saveImage(base64:string,uid:string) {return savePrivatePhoto(Buffer.from(base64,'base64'),uid,'image/png');}
 
 export const imagesRouter = Router();
 const previews = new PreviewCache();
@@ -27,7 +20,7 @@ const imageSchema = z.object({
   prompt: z.string().min(8).max(2000),
   view: z.enum(['front', 'back']).optional(),
   frontPreviewId: z.string().uuid().optional(),
-  wardrobeContext: z.array(z.record(z.any())).optional().default([]),
+  wardrobeContext: z.array(z.record(z.string(),z.any())).max(100).optional().default([]),
   styleProfile: z
     .object({
       skinTone: z.string().max(64).nullable().optional(),
@@ -90,7 +83,9 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
 
   const prompt = `Create a polished fashion inspiration image. Do not render app UI or text overlays. Focus on editorial styling and coherent outfit composition. The subject must have a pure white or transparent background, be tightly cropped, zoomed in, and fill the entire frame from edge to edge to maximize space usage. ${parsed.data.prompt}${wardrobeSummary}`;
 
+  const operation=await reserve(req.user!.uid,'views',1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
   try {
+    await reserveImageBudget(1);
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
       const openaiModels = [
@@ -129,7 +124,8 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
           }
 
           if (b64Data) {
-            const imageUrl = saveImageToDisk(b64Data);
+            const imageUrl = await saveImage(b64Data,req.user!.uid);
+            await settle(operation,true);
             return res.json({
               imageBase64: b64Data,
               imageUrl,
@@ -186,7 +182,8 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
           continue;
         }
 
-        const imageUrl = saveImageToDisk(imagePart.inlineData.data);
+        const imageUrl = await saveImage(imagePart.inlineData.data,req.user!.uid);
+        await settle(operation,true);
 
         return res.json({
           imageBase64: imagePart.inlineData.data, // Keeping for backward compatibility
@@ -237,6 +234,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
       attemptedModels: models,
     });
   } catch (error) {
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
     if (axios.isAxiosError(error)) {
       const upstreamStatus = error.response?.status;
       const upstreamData = error.response?.data as
@@ -260,7 +258,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
     }
 
     return res.status(500).json({ error: 'Failed to generate inspiration image' });
-  }
+  } finally {await settle(operation,false);}
 });
 
 // Resolve references from the signed-in user's wardrobe, never client-supplied URLs.
@@ -286,20 +284,25 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
       ])).digest('hex');
       const view = parsed.data.view;
       const result = await previews.generate(fingerprint, view, async front => {
-        const frontBytes = front ? (await fs.promises.readFile(path.join(__dirname, '../..', front.imageUrl))).toString('base64') : undefined;
-        const image = await generateOutfitView(ordered, parsed.data.prompt, JSON.stringify(parsed.data.styleProfile ?? {}), view, frontBytes);
-        return { imageUrl: saveImageToDisk(image), mimeType: 'image/png' };
+        const frontBytes = front ? (await privatePhotoBytes(front.imageUrl)).toString('base64') : undefined;
+        return withAllowance(uid,'views',async()=>{
+          const image = await generateOutfitView(ordered, parsed.data.prompt, JSON.stringify(parsed.data.styleProfile ?? {}), view, frontBytes);
+          return {imageUrl:await saveImage(image,uid),mimeType:'image/png'};
+        },1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
       }, parsed.data.frontPreviewId);
       return res.json({ ...result, referenceItemIds: ids, generationVersion: 'photo-references-v3' });
     }
-    const result = await generateReferencedOutfit(ordered, parsed.data.prompt,
-      JSON.stringify(parsed.data.styleProfile ?? {}));
-    return res.json({
-      front: { imageBase64: result.front, imageUrl: saveImageToDisk(result.front), mimeType: 'image/png' },
-      back: { imageBase64: result.back, imageUrl: saveImageToDisk(result.back), mimeType: 'image/png' },
-      model: result.model, referenceItemIds: result.referenceItemIds, generationVersion: result.generationVersion,
-    });
+    const payload=await withAllowance(uid,'views',async()=>{
+      const result=await generateReferencedOutfit(ordered,parsed.data.prompt,JSON.stringify(parsed.data.styleProfile??{}));
+      return {
+        front:{imageBase64:result.front,imageUrl:await saveImage(result.front,uid),mimeType:'image/png'},
+        back:{imageBase64:result.back,imageUrl:await saveImage(result.back,uid),mimeType:'image/png'},
+        model:result.model,referenceItemIds:result.referenceItemIds,generationVersion:result.generationVersion,
+      };
+    },2,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
+    return res.json(payload);
   } catch (error) {
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
     if (error instanceof Error && error.message === 'FRONT_PREVIEW_EXPIRED') return res.status(409).json({error:'This preview expired. Open the outfit again to create a fresh front view.'});
     if (error instanceof Error && error.message === 'PREVIEW_BUSY') return res.status(429).json({error:'The mannequin studio is busy. Please try again shortly.'});
     const status = axios.isAxiosError(error) ? error.response?.status : undefined;

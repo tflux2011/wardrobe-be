@@ -1,4 +1,5 @@
-import * as admin from 'firebase-admin';
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -17,13 +18,13 @@ if (serviceAccountEnv) {
       const decoded = Buffer.from(serviceAccountEnv, 'base64').toString('utf-8');
       serviceAccountJson = JSON.parse(decoded);
     }
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccountJson)
+    initializeApp({
+      credential: cert(serviceAccountJson)
     });
     initialized = true;
     console.log('[firebase-admin] Successfully initialized via env variable key.');
   } catch (e) {
-    console.error('[firebase-admin] Failed to parse Service Account Key from env: ', e);
+    console.error('[firebase-admin] Invalid service account configuration');
   }
 }
 
@@ -33,13 +34,13 @@ if (!initialized) {
   if (fs.existsSync(localKeyPath)) {
     try {
       const serviceAccountJson = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccountJson)
+      initializeApp({
+        credential: cert(serviceAccountJson)
       });
       initialized = true;
       console.log('[firebase-admin] Successfully initialized via local json file.');
     } catch (e) {
-      console.error('[firebase-admin] Failed to parse local service account JSON: ', e);
+      console.error('[firebase-admin] Invalid local service account configuration');
     }
   }
 }
@@ -50,5 +51,5 @@ if (!initialized) {
   );
 }
 
-export const firebaseAuth = initialized ? admin.auth() : null;
+export const firebaseAuth = initialized ? getAuth() : null;
 export const isFirebaseAuthInitialized = () => initialized;

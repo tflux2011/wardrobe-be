@@ -8,7 +8,7 @@ export const tripRequestSchema = z.object({
   homeCity: z.string().trim().max(200).optional(),
   purpose: z.string().trim().min(1).max(500),
   startDate: z.string().max(40), endDate: z.string().max(40),
-  styleProfile: z.record(z.unknown()).nullable().optional(),
+  styleProfile: z.record(z.string(),z.unknown()).nullable().optional(),
 });
 
 export function tripDateRange(start: string, end: string) {

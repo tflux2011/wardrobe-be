@@ -5,7 +5,8 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
+import { mediaRouter } from './routes/media';
+import { signMediaResponses } from './services/media';
 import { clothingRouter } from './routes/clothing';
 import { imagesRouter } from './routes/images';
 import { adminRouter } from './routes/admin';
@@ -17,35 +18,41 @@ import tripsRouter from './routes/trips';
 import { userRouter } from './routes/user';
 import { requireAuth } from './middleware/auth';
 import { requestLogger } from './middleware/request_logger';
-import { apiRateLimiter, stylistRateLimiter } from './middleware/rate_limit';
+import { apiRateLimiter, stylistRateLimiter, createRateLimiter } from './middleware/rate_limit';
 import { startCleanupSchedule } from './tasks/cleanup';
 
 const app = express();
 const PORT = process.env.PORT ?? 3002;
+app.disable('x-powered-by');
+// Set explicitly for the hosting topology; raw forwarding headers are never trusted.
+const proxyHops=Number(process.env.TRUST_PROXY_HOPS||(process.env.RENDER?'1':'0'));
+if(Number.isInteger(proxyHops)&&proxyHops>0&&proxyHops<=3)app.set('trust proxy',proxyHops);
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN ?? '*' }));
+const origins=[...new Set(['https://clad.style','https://www.clad.style','http://127.0.0.1:5174','http://localhost:5174',...(process.env.ALLOWED_ORIGIN||'').split(',').map(x=>x.trim()).filter(x=>x&&x!=='*')])];
+app.use(cors({origin:(origin,done)=>done(null,!origin||origins.includes(origin)),allowedHeaders:['Authorization','Content-Type','Idempotency-Key']}));
+app.use((_req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');next();});
 app.use(requestLogger);
 app.use(express.json({ limit: '10mb' }));
 
-// Serve uploaded images as static assets from /uploads/*
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+// Temporary photos and generated files must never be served as public static assets.
+app.use('/media', createRateLimiter({windowMs:60000,maxRequests:600}), mediaRouter);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api', apiRateLimiter);
+app.use('/api', createRateLimiter({windowMs:60000,maxRequests:600}));
 app.use('/api/admin', adminRouter);
 app.use('/api/user', userRouter); // Router handles auth requirements internally
-app.use('/api/wardrobe', requireAuth, wardrobeRouter);
-app.use('/api/clothing', requireAuth, clothingRouter);
-app.use('/api/images', requireAuth, imagesRouter);
-app.use('/api/outfits', requireAuth, outfitsRouter);
-app.use('/api/outfits', requireAuth, weeklyRouter);
-app.use('/api/stylist', stylistRateLimiter, requireAuth, stylistRouter);
-app.use('/api/trips', requireAuth, tripsRouter);
+app.use('/api/wardrobe', requireAuth, apiRateLimiter, signMediaResponses, wardrobeRouter);
+app.use('/api/clothing', requireAuth, apiRateLimiter, signMediaResponses, clothingRouter);
+app.use('/api/images', requireAuth, apiRateLimiter, signMediaResponses, imagesRouter);
+app.use('/api/outfits', requireAuth, apiRateLimiter, signMediaResponses, outfitsRouter);
+app.use('/api/outfits', requireAuth, apiRateLimiter, signMediaResponses, weeklyRouter);
+app.use('/api/stylist', requireAuth, stylistRateLimiter, apiRateLimiter, signMediaResponses, stylistRouter);
+app.use('/api/trips', requireAuth, apiRateLimiter, signMediaResponses, tripsRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', release:'beta-security-v1', timestamp: new Date().toISOString() });
 });
 
 // ── Global error handler ──────────────────────────────────────────────────────

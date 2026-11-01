@@ -5,30 +5,43 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { validateBuildGuidance } from '../services/build_guidance';
 import sharp from 'sharp';
-import axios from 'axios';
 import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches, analyzeBuildPhoto } from '../services/claude_service';
 import { prisma } from '../lib/prisma';
-import { uploadBufferToSupabase, uploadLocalFileToSupabase } from '../lib/supabase';
+import { savePrivatePhoto } from '../services/media';
+import { reserve, settle, garmentLimit, reservePlatformBudget, positiveSetting } from '../services/usage';
+import { ApiError } from '../utils/errors';
 
 export const clothingRouter = Router();
 
-// Cache raw image URLs to their background-enhanced versions
-export const enhancedImageCache = new Map<string, string>();
-
-async function resizeImageInPlace(filePath: string, maxWidth = 1024, maxHeight = 1024) {
+async function resizeImageInPlace(filePath: string, maxWidth=1024, maxHeight=1024) {
+  const tempPath=`${filePath}_temp`;
   try {
-    const tempPath = `${filePath}_temp`;
-    await sharp(filePath)
-      .rotate()
-      .flatten({background:'#ffffff'})
-      .resize({ width: maxWidth, height: maxHeight, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toFile(tempPath);
-    fs.renameSync(tempPath, filePath);
-  } catch (err) {
-    console.error('Failed to resize image in-place:', err);
+    const image=sharp(filePath,{limitInputPixels:25_000_000,failOn:'warning'});
+    const metadata=await image.metadata();
+    if(!['jpeg','png'].includes(metadata.format||'') || !metadata.width || !metadata.height)throw new Error('Unsupported image');
+    await image.rotate().flatten({background:'#ffffff'}).resize({width:maxWidth,height:maxHeight,fit:'inside',withoutEnlargement:true}).jpeg({quality:80}).toFile(tempPath);
+    fs.renameSync(tempPath,filePath);
+  } catch {
+    fs.unlink(tempPath,()=>undefined);
+    throw new ApiError(400,'Choose a valid JPEG or PNG photo with no more than 25 million pixels.');
   }
 }
+async function saveUploadedPhoto(filePath:string,uid:string) {
+  const bytes=await fs.promises.readFile(filePath);
+  const metadata=await sharp(bytes).metadata();
+  return savePrivatePhoto(bytes,uid,metadata.format==='png'?'image/png':'image/jpeg');
+}
+async function uploadAllowance(req:Request,res:Response,next:import('express').NextFunction) {
+  try {
+    if(req.method!=='POST'||!['/upload','/split','/match','/build-photo'].includes(req.path))return next();
+    const uid=req.user!.uid;
+    if(['/upload','/split'].includes(req.path) && await prisma.clothingItem.count({where:{userId:uid}})>=garmentLimit())throw new ApiError(429,'Your closet allowance is full. You can still edit or remove your existing pieces.');
+    const id=await reserve(uid,'uploads',1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
+    // Upload attempts count even if decoding/analysis fails, preventing free repeated AI work.
+    try{await reservePlatformBudget('uploads',1,positiveSetting('DAILY_PLATFORM_UPLOAD_LIMIT',2000));await settle(id,true);}catch(error){await settle(id,false);throw error;}next();
+  }catch(error){next(error);}
+}
+clothingRouter.use(uploadAllowance);
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
@@ -43,31 +56,6 @@ if (!fs.existsSync(SPLITS_DIR)) {
 }
 if (!fs.existsSync(GENERATED_DIR)) {
   fs.mkdirSync(GENERATED_DIR, { recursive: true });
-}
-
-function imageModelCandidates(): string[] {
-  const primary = process.env.GEMINI_IMAGE_MODEL?.trim();
-  const fromList = (process.env.GEMINI_IMAGE_MODELS ?? '')
-    .split(',')
-    .map((m) => m.trim())
-    .filter(Boolean);
-
-  const defaults = [
-    'gemini-3.1-flash-image-preview',
-    'gemini-2.5-flash-image',
-    'gemini-3-pro-image-preview',
-  ];
-
-  return [...new Set([...(primary ? [primary] : []), ...fromList, ...defaults])];
-}
-
-function isRetryableModelError(message?: string): boolean {
-  if (!message) return false;
-  const normalized = message.toLowerCase();
-  return normalized.includes('is not found')
-    || normalized.includes('does not support the requested response modalities')
-    || normalized.includes('not supported for generatecontent')
-    || normalized.includes('unsupported model');
 }
 
 function expandRegion(
@@ -92,99 +80,6 @@ function expandRegion(
   };
 }
 
-async function generateFullGarmentImage(
-  croppedPath: string,
-  hints?: { category?: string; colors?: string[]; style?: string; name?: string },
-): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    return null;
-  }
-
-  const content = fs.readFileSync(croppedPath);
-  const inputBase64 = content.toString('base64');
-  const models = imageModelCandidates();
-  const styleHint = hints?.style ? ` Style direction: ${hints.style}.` : '';
-  const colorHint = hints?.colors && hints.colors.length > 0
-    ? ` Dominant colors: ${hints.colors.join(', ')}.`
-    : '';
-  const categoryHint = hints?.category ? ` Garment type: ${hints.category}.` : '';
-  const nameHint = hints?.name ? ` Item name: ${hints.name}.` : '';
-
-  const prompt = `Given the reference garment image, generate a complete full-length product-style image of the same clothing item.${categoryHint}${nameHint}${colorHint}${styleHint} Keep the exact garment design and texture. Show the full clothing piece centered, uncropped, neutral studio background, no mannequin, no person, no text, no watermark.`;
-
-  for (const model of models) {
-    try {
-      const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: 'image/png',
-                    data: inputBase64,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ['IMAGE'],
-            imageConfig: { aspectRatio: '3:4' },
-          },
-        },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 60000,
-        },
-      );
-
-      const parts = response.data?.candidates?.[0]?.content?.parts;
-      const imagePart = Array.isArray(parts)
-        ? parts.find((part: any) => part.inlineData?.data)
-        : null;
-
-      const generatedBase64 = imagePart?.inlineData?.data as string | undefined;
-      if (!generatedBase64) {
-        continue;
-      }
-
-      const generatedFilename = `${randomUUID()}_full.png`;
-      try {
-        const publicUrl = await uploadBufferToSupabase(
-          Buffer.from(generatedBase64, 'base64'),
-          generatedFilename
-        );
-        return publicUrl;
-      } catch (uploadError) {
-        console.error('Failed to upload enhanced image to Supabase:', uploadError);
-        return null;
-      }
-    } catch (error) {
-      if (!axios.isAxiosError(error)) {
-        continue;
-      }
-
-      const upstreamData = error.response?.data as
-        | { error?: { message?: string } }
-        | undefined;
-      const message = upstreamData?.error?.message;
-
-      if (isRetryableModelError(message)) {
-        continue;
-      }
-
-      return null;
-    }
-  }
-
-  return null;
-}
-
 /**
  * Multer config — accept only JPEG/PNG, max 10 MB.
  * Files are stored with a UUID filename to prevent path traversal.
@@ -192,14 +87,13 @@ async function generateFullGarmentImage(
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${randomUUID()}${ext}`);
+    cb(null, `${randomUUID()}.jpg`);
   },
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024, files:1, fields:8, parts:9, fieldSize:16*1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
     const allowed = ['.jpg', '.jpeg', '.png'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -234,7 +128,7 @@ clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,r
     await resizeImageInPlace(req.file.path);
     const result=await analyzeBuildPhoto(req.file.path);
     return res.json(validateBuildGuidance(result));
-  }catch{return res.status(502).json({error:'Could not assess this photo. You can use measurements instead.'});}
+  }catch(error){return res.status(error instanceof ApiError?error.statusCode:502).json({error:error instanceof ApiError?error.message:'Could not assess this photo. You can use measurements instead.'});}
   finally{fs.unlink(req.file.path,()=>undefined);fs.unlink(req.file.path+'_temp',()=>undefined);}
 });
 
@@ -257,10 +151,10 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
     // 3. Upload the resized raw image to Supabase immediately
     let rawImageUrl: string;
     try {
-      rawImageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
+      rawImageUrl = await saveUploadedPhoto(req.file.path, req.user!.uid);
     } catch (uploadErr: any) {
       console.error('Failed to upload raw resized image to Supabase', uploadErr);
-      throw new Error(`Failed to save image to Supabase: ${uploadErr.message}`);
+      throw uploadErr;
     }
 
     // 4. Return the extracted tags and rawImageUrl to the client immediately (UX: fast response!)
@@ -272,7 +166,8 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
   } catch (err) {
     // Clean up the uploaded file on processing failure
     fs.unlink(req.file.path, () => undefined);
-    console.error('[clothing/upload]', err);
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
+    console.error('[clothing/upload] Processing failed');
 
     const message = err instanceof Error ? err.message : 'Unknown upload error';
     if (message.includes('ANTHROPIC_API_KEY') || message.includes('authentication method')) {
@@ -296,7 +191,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
     return res.status(400).json({ error: 'No image file provided' });
   }
   const uploadedPath = req.file.path;
-  const uploadedFilename = req.file.filename;
+  const croppedPaths:string[]=[];
 
   try {
     // 1. Perform in-place image downscaling and compression immediately
@@ -312,24 +207,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
 
     if (selectedRegions.length <= 1) {
       const singleTags = await tagClothingItem(uploadedPath);
-      const enhancedImageUrl = await generateFullGarmentImage(uploadedPath, {
-        category: singleTags.category,
-        colors: singleTags.colors,
-        style: singleTags.style,
-        name: singleTags.name,
-      });
-      let imageUrl = enhancedImageUrl;
-      if (!imageUrl) {
-        try {
-          imageUrl = await uploadLocalFileToSupabase(uploadedPath, uploadedFilename);
-          fs.unlink(uploadedPath, () => undefined);
-        } catch (uploadErr: any) {
-          console.error('Failed to upload single split raw image to Supabase', uploadErr);
-          throw new Error(`Failed to save split image to Supabase: ${uploadErr.message}`);
-        }
-      } else {
-        fs.unlink(uploadedPath, () => undefined);
-      }
+      const imageUrl=await saveUploadedPhoto(uploadedPath,req.user!.uid);
       return res.json({
         items: [{
           ...singleTags,
@@ -342,6 +220,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
     const itemResults = await Promise.allSettled(selectedRegions.map(async (region) => {
       const filename = `${randomUUID()}.png`;
       const outputPath = path.join(SPLITS_DIR, filename);
+      croppedPaths.push(outputPath);
       const expanded = expandRegion(
         { x: region.x, y: region.y, width: region.width, height: region.height },
         metadata.width,
@@ -361,11 +240,11 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
       const tags = await tagClothingItem(outputPath, { categoryHint: region.category });
       let imageUrl: string;
       try {
-        imageUrl = await uploadLocalFileToSupabase(outputPath, filename);
+        imageUrl = await saveUploadedPhoto(outputPath, req.user!.uid);
         fs.unlink(outputPath, () => undefined);
       } catch (uploadErr: any) {
         console.error('Failed to upload split crop to Supabase', uploadErr);
-        throw new Error(`Failed to save split crop to Supabase: ${uploadErr.message}`);
+        throw uploadErr;
       }
 
       return {
@@ -397,7 +276,8 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
     fs.unlink(uploadedPath, () => undefined);
     return res.json({ items });
   } catch (err) {
-    console.error('[clothing/split]', err);
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
+    console.error('[clothing/split] Processing failed');
 
     const message = err instanceof Error ? err.message : 'Unknown split error';
     if (message.includes('ANTHROPIC_API_KEY') || message.includes('authentication method')) {
@@ -409,6 +289,8 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
     }
 
     return res.status(500).json({ error: 'Failed to split and analyse image' });
+  } finally {
+    for(const file of [uploadedPath,...croppedPaths])fs.unlink(file,()=>undefined);
   }
 });
 
@@ -461,11 +343,11 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
     // Upload retail garment image to Supabase Storage
     let imageUrl: string;
     try {
-      imageUrl = await uploadLocalFileToSupabase(req.file.path, req.file.filename);
+      imageUrl = await saveUploadedPhoto(req.file.path, req.user!.uid);
       fs.unlink(req.file.path, () => undefined);
     } catch (uploadErr: any) {
       console.error('Failed to upload retail garment to Supabase', uploadErr);
-      throw new Error(`Failed to upload retail image to Supabase: ${uploadErr.message}`);
+      throw uploadErr;
     }
 
     return res.json({
@@ -478,7 +360,8 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
   } catch (err) {
     // Clean up file upload
     fs.unlink(req.file.path, () => undefined);
-    console.error('[clothing/match]', err);
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
+    console.error('[clothing/match] Processing failed');
     return res.status(500).json({ error: 'Failed to process store item match' });
   }
 });

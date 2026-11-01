@@ -1,10 +1,13 @@
+import { withAllowance } from '../services/usage';
+import { garmentLimit, lockUser } from '../services/usage';
+import { ownedPhoto, mediaId, removePrivatePhotos } from '../services/media';
+import { ApiError } from '../utils/errors';
 import { escapeHtml } from '../services/email_templates';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { EmailService } from '../services/email_service';
-import { enhancedImageCache } from './clothing';
 
 export const wardrobeRouter = Router();
 
@@ -61,39 +64,11 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
 
   try {
     await ensureUser(uid, req.user?.email);
-    let dbItems = await prisma.clothingItem.findMany({
+    const dbItems = await prisma.clothingItem.findMany({
       where: { userId: uid },
       orderBy: { addedAt: 'desc' },
     });
     
-    // Auto-heal / Fallback: If 0 items found for current UID, search for items linked to other UIDs with the same verified email
-    if (dbItems.length === 0 && req.user?.email) {
-      const emailMatchUsers = await prisma.user.findMany({
-        where: { email: req.user.email, id: { not: uid } },
-      });
-
-      if (emailMatchUsers.length > 0) {
-        const otherUids = emailMatchUsers.map((u: any) => u.id);
-        const orphanItems = await prisma.clothingItem.findMany({
-          where: { userId: { in: otherUids } },
-          orderBy: { addedAt: 'desc' },
-        });
-
-        if (orphanItems.length > 0) {
-          console.log(`[wardrobe/auto-heal] Found ${orphanItems.length} items linked to old UID(s) for ${req.user.email}. Re-linking to current UID ${uid}...`);
-          await prisma.clothingItem.updateMany({
-            where: { userId: { in: otherUids } },
-            data: { userId: uid },
-          });
-
-          dbItems = await prisma.clothingItem.findMany({
-            where: { userId: uid },
-            orderBy: { addedAt: 'desc' },
-          });
-        }
-      }
-    }
-
     // Parse JSON string fields back to arrays
     const items = dbItems.map((item: any) => ({
       ...item,
@@ -111,17 +86,18 @@ wardrobeRouter.get('/', async (req: Request, res: Response) => {
 });
 
 const createItemSchema = z.object({
-  id: z.string().optional(), // allow client to provide id
-  name: z.string(),
-  category: z.string(),
-  style: z.string(),
-  colors: z.array(z.string()),
-  occasions: z.array(z.string()),
-  seasons: z.array(z.string()),
-  tags: z.array(z.string()),
-  imageUrl: z.string(),
-  localImagePath: z.string().optional().default(''),
+  id: z.string().min(1).max(128).optional(), // allow client to provide id
+  name: z.string().min(1).max(200),
+  category: z.string().max(80),
+  style: z.string().max(200),
+  colors: z.array(z.string().max(120)).max(64),
+  occasions: z.array(z.string().max(120)).max(64),
+  seasons: z.array(z.string().max(120)).max(64),
+  tags: z.array(z.string().max(120)).max(64),
+  imageUrl: z.string().max(4096),
+  localImagePath: z.string().max(4096).optional().default(''),
   price: z.number().nullable().optional(),
+  addedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 // POST /api/wardrobe
@@ -138,25 +114,19 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
     await ensureUser(uid, req.user?.email);
     const data = parsed.data;
 
-    // Check if the background generative AI has already completed
-    // and swapped out the raw image URL for the enhanced one.
-    let imageUrl = data.imageUrl;
-    const cachedEnhancedUrl = enhancedImageCache.get(data.imageUrl);
-    if (cachedEnhancedUrl) {
-      imageUrl = cachedEnhancedUrl;
-      enhancedImageCache.delete(data.imageUrl); // clean up memory mapping
-    }
-    
+    const newItem=await prisma.$transaction(async tx=>{
+    await lockUser(tx,uid);
+    const imageUrl=await ownedPhoto(data.imageUrl,uid,tx);
     // If an ID is provided, check if it already exists to handle retries and syncing safely.
     if (data.id) {
-      const existing = await prisma.clothingItem.findUnique({
+      const existing = await tx.clothingItem.findUnique({
         where: { id: data.id }
       });
       if (existing) {
         if (existing.userId !== uid) {
-          return res.status(403).json({ error: 'Forbidden: Item belongs to another user' });
+          throw new ApiError(403,'Forbidden');
         }
-        const updatedItem = await prisma.clothingItem.update({
+        const updatedItem = await tx.clothingItem.update({
           where: { id: data.id },
           data: {
             name: data.name,
@@ -171,18 +141,14 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
             price: data.price,
           },
         });
-        return res.json({
-          ...updatedItem,
-          colors: JSON.parse(updatedItem.colors),
-          occasions: JSON.parse(updatedItem.occasions),
-          seasons: JSON.parse(updatedItem.seasons),
-          tags: JSON.parse(updatedItem.tags),
-        });
+        return updatedItem;
       }
     }
     
-    const newItem = await prisma.clothingItem.create({
+    if(await tx.clothingItem.count({where:{userId:uid}})>=garmentLimit())throw new ApiError(429,'Your closet allowance is full. Your existing pieces remain available to edit or remove.',{code:'GARMENT_LIMIT',limit:garmentLimit()});
+    const newItem = await tx.clothingItem.create({
       data: {
+        addedAt: data.addedAt ? new Date(data.addedAt) : undefined,
         id: data.id, // optional
         userId: uid,
         name: data.name,
@@ -198,6 +164,9 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
       },
     });
 
+    return newItem;
+    });
+
     return res.json({
       ...newItem,
       colors: JSON.parse(newItem.colors),
@@ -206,7 +175,8 @@ wardrobeRouter.post('/', async (req: Request, res: Response) => {
       tags: JSON.parse(newItem.tags),
     });
   } catch (error) {
-    console.error('[wardrobe/create]', error);
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
+    console.error('[wardrobe/create] Failed');
     return res.status(500).json({ error: 'Failed to save clothing item' });
   }
 });
@@ -217,7 +187,7 @@ wardrobeRouter.post('/wear', async (req: Request, res: Response) => {
   if (!uid) return res.status(401).json({ error: 'Unauthorized' });
 
   const wearSchema = z.object({
-    itemIds: z.array(z.string()),
+    itemIds: z.array(z.string().max(120)).max(64),
   });
 
   const parsed = wearSchema.safeParse(req.body);
@@ -282,10 +252,17 @@ wardrobeRouter.delete('/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    await prisma.clothingItem.delete({
-      where: { id: itemId },
+    const assetId=mediaId(item.imageUrl);
+    const removePhoto=await prisma.$transaction(async tx=>{
+      await lockUser(tx,uid);
+      await tx.clothingItem.delete({where:{id:itemId}});
+      if(assetId && !await tx.clothingItem.count({where:{userId:uid,imageUrl:item.imageUrl}})) {
+        await tx.mediaAsset.updateMany({where:{id:assetId,userId:uid},data:{ready:false}});
+        return true;
+      }
+      return false;
     });
-
+    if(removePhoto && assetId)try{await removePrivatePhotos(uid,[assetId]);}catch{console.error('[wardrobe/delete] Photo cleanup deferred');}
     return res.json({ success: true });
   } catch (error) {
     console.error('[wardrobe/delete]', error);
@@ -330,7 +307,7 @@ For each gap, provide:
 
 Return the response strictly as a JSON array of objects with keys: missingItem, reason, searchQuery.`;
 
-    const result = await model.generateContent({
+    const result = await withAllowance(uid,'styling',()=>model.generateContent({
       contents: [
         {
           role: 'user',
@@ -341,7 +318,7 @@ Return the response strictly as a JSON array of objects with keys: missingItem, 
         responseMimeType: 'application/json',
       },
       systemInstruction: systemPrompt,
-    });
+    }));
 
     const responseText = result.response.text();
     let gaps = [];
@@ -353,6 +330,7 @@ Return the response strictly as a JSON array of objects with keys: missingItem, 
 
     return res.json(gaps);
   } catch (err) {
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
     console.error('[wardrobe/gaps]', err);
     return res.status(500).json({ error: 'Failed to analyze wardrobe gaps' });
   }

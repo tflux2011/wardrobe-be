@@ -1,3 +1,7 @@
+import { protectCredentials } from '../middleware/abuse';
+import { usageSummary } from '../services/usage';
+import { removePrivatePhotos } from '../services/media';
+import { z } from 'zod';
 import { appUrl, passwordResetEmail } from '../services/email_templates';
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
@@ -11,10 +15,10 @@ export const userRouter = Router();
 
 // POST /api/user/forgot-password
 // Generates a custom recovery token and dispatches a Sand Linen branded HTML email
-userRouter.post('/forgot-password', async (req: Request, res: Response) => {
+userRouter.post('/forgot-password', protectCredentials, async (req: Request, res: Response) => {
   const { email } = req.body;
 
-  if (!email || typeof email !== 'string') {
+  if (!email || typeof email !== 'string' || email.length>320) {
     return res.status(400).json({ error: 'Valid email coordinates are required.' });
   }
 
@@ -39,7 +43,7 @@ userRouter.post('/forgot-password', async (req: Request, res: Response) => {
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        resetToken: token,
+        resetToken: crypto.createHash('sha256').update(token).digest('hex'),
         resetTokenExpires: tokenExpires
       }
     });
@@ -62,15 +66,15 @@ userRouter.post('/forgot-password', async (req: Request, res: Response) => {
 
 // POST /api/user/reset-password
 // Verifies custom recovery token and updates credentials inside Firebase Authentication
-userRouter.post('/reset-password', async (req: Request, res: Response) => {
+userRouter.post('/reset-password', protectCredentials, async (req: Request, res: Response) => {
   const { token, newPassword } = req.body;
 
-  if (!token || typeof token !== 'string') {
+  if (!token || typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
     return res.status(400).json({ error: 'Verification token coordinate is required.' });
   }
 
-  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-    return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 128) {
+    return res.status(400).json({ error: 'New password must be between 8 and 128 characters long.' });
   }
 
   if (!firebaseAuth) {
@@ -82,7 +86,7 @@ userRouter.post('/reset-password', async (req: Request, res: Response) => {
     // 1. Validate token and check expiration
     const user = await prisma.user.findFirst({
       where: {
-        resetToken: token,
+        resetToken: crypto.createHash('sha256').update(token).digest('hex'),
         resetTokenExpires: {
           gt: new Date()
         }
@@ -93,11 +97,14 @@ userRouter.post('/reset-password', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Verification token is invalid, expired, or has already been used.' });
     }
 
+    const consumed=await prisma.user.updateMany({where:{id:user.id,resetToken:user.resetToken,resetTokenExpires:{gt:new Date()}},data:{resetToken:null,resetTokenExpires:null}});
+    if(consumed.count!==1)return res.status(400).json({error:'This reset link has already been used.'});
     // 2. Synchronize credentials directly inside Firebase Auth
     await firebaseAuth.updateUser(user.id, {
       password: newPassword
     });
 
+    await firebaseAuth.revokeRefreshTokens(user.id);
     // 3. Wipes active token parameters
     await prisma.user.update({
       where: { id: user.id },
@@ -115,13 +122,16 @@ userRouter.post('/reset-password', async (req: Request, res: Response) => {
 });
 
 userRouter.use(requireAuth);
+userRouter.get('/usage',async(req,res)=>res.json(await usageSummary(req.user!.uid)));
 
 // POST /api/user/profile
 // Creates or updates the user profile with full name and gender
 userRouter.post('/profile', async (req: Request, res: Response) => {
   const uid = (req as any).user?.uid;
   const email = (req as any).user?.email?.toLowerCase().trim();
-  const { fullName, gender } = req.body;
+  const parsed=z.object({fullName:z.string().trim().min(1).max(120).optional(),gender:z.enum(['Male','Female','Non-binary','Other','male','female','non-binary','other']).optional()}).safeParse(req.body);
+  if(!parsed.success)return res.status(400).json({error:'Check your profile details.'});
+  const { fullName, gender } = parsed.data;
 
   if (!uid) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -143,7 +153,7 @@ userRouter.post('/profile', async (req: Request, res: Response) => {
       },
     });
 
-    return res.json(user);
+    return res.json({ id: user.id, email: user.email, fullName: user.fullName, gender: user.gender });
   } catch (error) {
     console.error('[user/profile]', error);
     return res.status(500).json({ error: 'Failed to update user profile' });
@@ -207,6 +217,9 @@ userRouter.delete('/', async (req: Request, res: Response) => {
   }
 
   try {
+    const assets=await prisma.mediaAsset.findMany({where:{userId:uid},select:{id:true}});
+    await removePrivatePhotos(uid,assets.map(a=>a.id));
+    if(firebaseAuth)await firebaseAuth.deleteUser(uid).catch(error=>{if(error?.code!=='auth/user-not-found')throw error;});
     // Optional: Delete user images from Supabase Storage if you want to be thorough.
     // However, tracking all individual image paths requires fetching them first.
     // For V1 MVP, database deletion with cascade is sufficient.

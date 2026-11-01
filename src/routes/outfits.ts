@@ -1,3 +1,5 @@
+import { ApiError } from '../utils/errors';
+import { withAllowance } from '../services/usage';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { generateOutfitSuggestions } from '../services/claude_service';
@@ -65,14 +67,15 @@ outfitsRouter.post('/suggest', async (req: Request, res: Response) => {
       wearCount:item.wearCount,
     }));
 
-    const suggestions = await generateOutfitSuggestions({
+    const suggestions = await withAllowance(uid,'styling',()=>generateOutfitSuggestions({
       occasion,
       weather,
       wardrobe,
       styleProfile:styleProfile||undefined,
-    });
+    }));
     return res.json(suggestions);
   } catch (err) {
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
     console.error('[outfits/suggest]', err);
     return res.status(500).json({ error: 'Failed to generate outfit suggestions' });
   }

@@ -11,10 +11,7 @@ type ClientEntry = {
 };
 
 function getClientKey(req: Request): string {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (typeof forwardedFor === 'string' && forwardedFor.trim().length > 0) {
-    return forwardedFor.split(',')[0].trim();
-  }
+  // Express resolves proxies only when explicitly configured; never trust raw headers.
   return req.ip || 'unknown';
 }
 
@@ -30,7 +27,10 @@ export function createRateLimiter(options: RateLimitOptions) {
 
   return (req: Request, res: Response, next: NextFunction): void => {
     const now = Date.now();
-    const key = getClientKey(req);
+    const key = req.user?.uid ? `user:${req.user.uid}` : getClientKey(req);
+    for (const [client, entry] of clients) {
+      if (now >= entry.resetAtMs) clients.delete(client);
+    }
 
     const existing = clients.get(key);
     if (!existing || now >= existing.resetAtMs) {

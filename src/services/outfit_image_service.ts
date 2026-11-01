@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { mediaId, privatePhotoUrl } from './media';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -7,7 +8,13 @@ export type ImageEditor = (prompt: string, images: string[]) => Promise<string>;
 
 /** Fail closed: a missing photograph must never become a text-only guess. */
 export async function referenceImage(source: string): Promise<string> {
-  if (/^https:\/\//i.test(source)) return source;
+  if (mediaId(source)) return privatePhotoUrl(source);
+  if (/^https:\/\//i.test(source)) {
+    const allowed=new URL(process.env.NEXT_PUBLIC_SUPABASE_URL||'https://invalid.local');
+    const url=new URL(source);
+    if(url.origin!==allowed.origin||!url.pathname.startsWith('/storage/v1/object/'))throw new Error('Untrusted garment photograph');
+    return source;
+  }
   if (!source.startsWith('/uploads/')) throw new Error('A selected garment has no usable photograph.');
   const root = path.resolve(__dirname, '../../uploads');
   const filename = path.resolve(root, source.slice('/uploads/'.length));

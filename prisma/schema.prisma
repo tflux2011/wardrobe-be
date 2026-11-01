@@ -101,3 +101,38 @@ model EmailTemplate {
   body      String   // Markdown or HTML template
   updatedAt DateTime @default(now()) @updatedAt
 }
+
+// Server-owned allowances, shared by Android and web. Never writable by clients.
+model UsageCounter {
+  userId String
+  feature String
+  period String
+  used Int @default(0)
+  @@id([userId, feature, period])
+}
+
+model UsageOperation {
+  id String @id
+  userId String
+  feature String
+  period String
+  amount Int
+  state String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([state, expiresAt])
+  @@index([userId, feature, period])
+}
+
+model MediaAsset {
+  id String @id @default(uuid())
+  userId String
+  storagePath String @unique
+  legacyUrl String?
+  bytes Int
+  mimeType String
+  ready Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([legacyUrl])
+}

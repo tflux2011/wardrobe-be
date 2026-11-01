@@ -86,7 +86,7 @@ export async function requireAuth(
     const authHeader = req.header('Authorization');
     const token = parseBearerToken(authHeader);
     if (!token) {
-      console.warn(`[auth] Missing or invalid Authorization header format. Raw header: "${authHeader}"`);
+      console.warn('[auth] Missing or invalid Authorization header');
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -101,7 +101,7 @@ export async function requireAuth(
     req.user = user;
     next();
   } catch (error: any) {
-    console.error('[auth] Token verification exception:', error.stack || error.message || error);
+    console.error('[auth] Token verification failed');
     res.status(401).json({ error: 'Unauthorized' });
   }
 }

@@ -1,3 +1,7 @@
+import {fakeUsage} from './usage_fixture';
+import {supabase} from '../src/lib/supabase';
+process.env.NEXT_PUBLIC_SUPABASE_URL='https://storage.example';
+process.env.SUPABASE_SERVICE_ROLE_KEY='test-only-storage-key';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateReferencedOutfit, referenceImage } from '../src/services/outfit_image_service';
@@ -5,8 +9,8 @@ import { generateReferencedOutfit, referenceImage } from '../src/services/outfit
 test('front receives every photograph; back uses front plus identical references', async () => {
   const calls: { prompt: string; images: string[] }[] = [];
   const garments = [
-    { id: 'shirt', name: 'Blue linen shirt', category: 'top', imageUrl: 'https://storage.example/shirt.png' },
-    { id: 'pants', name: 'Khaki cargo pants', category: 'bottom', imageUrl: 'https://storage.example/pants.png' },
+    { id: 'shirt', name: 'Blue linen shirt', category: 'top', imageUrl: 'https://storage.example/storage/v1/object/public/wardrobe-images/shirt.png' },
+    { id: 'pants', name: 'Khaki cargo pants', category: 'bottom', imageUrl: 'https://storage.example/storage/v1/object/public/wardrobe-images/pants.png' },
   ];
   const result = await generateReferencedOutfit(garments, 'minimal', 'masculine', async (prompt, images) => {
     calls.push({ prompt, images });
@@ -35,6 +39,8 @@ import { prisma } from '../src/lib/prisma';
 import { imagesRouter } from '../src/routes/images';
 
 test('route loads only owned records and returns confirmed photo references', async t => {
+  const store=fakeUsage(t);
+  t.mock.method(supabase.storage,'from',()=>({upload:async()=>({error:null}),remove:async()=>({error:null}),download:async()=>({data:new Blob([Buffer.from('test')]),error:null})}));
   const originalFind = prisma.clothingItem.findMany;
   const originalKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'test-only-not-a-real-key';
@@ -48,7 +54,7 @@ test('route loads only owned records and returns confirmed photo references', as
   let available = true;
   prisma.clothingItem.findMany = (async (args: any) => {
     assert.deepEqual(args.where, { userId: 'signed-in-user', id: { in: ['shirt'] } });
-    return available ? [{ id: 'shirt', name: 'My actual shirt', category: 'top', imageUrl: 'https://storage.example/actual-shirt.png' }] : [];
+    return available ? [{ id: 'shirt', name: 'My actual shirt', category: 'top', imageUrl: 'https://storage.example/storage/v1/object/public/wardrobe-images/actual-shirt.png' }] : [];
   }) as any;
   t.after(() => {
     prisma.clothingItem.findMany = originalFind;
@@ -70,9 +76,10 @@ test('route loads only owned records and returns confirmed photo references', as
     const data = await response.json() as any;
     assert.equal(data.generationVersion, 'photo-references-v2');
     assert.deepEqual(data.referenceItemIds, ['shirt']);
-    assert.deepEqual(calls[0].images, [{ image_url: 'https://storage.example/actual-shirt.png' }]);
+    assert.deepEqual(calls[0].images, [{ image_url: 'https://storage.example/storage/v1/object/public/wardrobe-images/actual-shirt.png' }]);
     assert.equal(calls[1].images[0].image_url, 'data:image/png;base64,dGVzdA==');
-    for (const view of ['front', 'back']) await fs.unlink(path.join(__dirname, '..', data[view].imageUrl));
+    assert.match(data.front.imageUrl,/^\/media\//);
+    assert.match(data.back.imageUrl,/^\/media\//);
     const first = await (await request('front')).json() as any;
     assert.equal(calls.length, 3);
     assert.equal(first.front.imageBase64, undefined);
@@ -83,7 +90,7 @@ test('route loads only owned records and returns confirmed photo references', as
     const back = await (await request('back', first.previewId)).json() as any;
     assert.equal(calls.length, 4);
     assert.equal(calls[3].images[0].image_url, 'data:image/png;base64,dGVzdA==');
-    for (const view of [first.front, back.back]) await fs.unlink(path.join(__dirname, '..', view.imageUrl));
+    assert.equal(store.assets.size,4);
     available = false;
     assert.equal((await request('front')).status, 422);
     assert.equal(calls.length, 4);

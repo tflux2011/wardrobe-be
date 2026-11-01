@@ -1,3 +1,5 @@
+import { withAllowance } from '../services/usage';
+import { ApiError } from '../utils/errors';
 import { appUrl, escapeHtml, packingEmailHtml, itineraryEmailHtml } from '../services/email_templates';
 import {generateValidatedTrip, TripGenerationError} from '../services/trip_generation';
 import { Router } from 'express';
@@ -29,6 +31,7 @@ router.get('/', async (req, res) => {
       suggestedAdditions: JSON.parse(t.suggestedAdditions || '[]'),
     })));
   } catch (error) {
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
     console.error('Error fetching trips:', error);
     res.status(500).json({ error: 'Failed to fetch trips' });
   }
@@ -59,6 +62,7 @@ router.post('/plan', async (req, res) => {
       return res.status(400).json({ error: 'Your closet is empty. Add clothes first.' });
     }
 
+    const {plan,trip}=await withAllowance(uid,'trips',async()=>{
     const plan = await generateValidatedTrip((repair) => generateTripPlan({
       repair,
       destination,
@@ -93,6 +97,9 @@ router.post('/plan', async (req, res) => {
         suggestedAdditions: JSON.stringify(plan.suggestedAdditions || []),
       },
     });
+
+    return {plan,trip};
+    },1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
 
     // Dispatch the trip digest email in the background
     if (req.user?.email) {
@@ -132,6 +139,7 @@ router.post('/plan', async (req, res) => {
     });
 
   } catch (error) {
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
     if(error instanceof TripGenerationError)return res.status(422).json({error:error.message});
     console.error('Error planning trip:', error);
     res.status(500).json({ error: 'Failed to generate trip plan' });
@@ -146,7 +154,7 @@ router.post('/:id/ideas/:index/pairings',async(req,res)=>{
   const ideas=JSON.parse(trip.suggestedAdditions||'[]');if(index>=ideas.length)return res.status(404).json({error:'Idea not found.'});
   const wardrobe=await prisma.clothingItem.findMany({where:{userId:uid}});
   if(!wardrobe.length)return res.status(400).json({error:'Add clothing to your closet first.'});
-  const pairing=await pairWardrobeIdea(ideas[index],wardrobe.map(i=>({id:i.id,name:i.name,category:i.category,colors:JSON.parse(i.colors),style:i.style})),req.body?.styleProfile);
+  const pairing=await withAllowance(uid,'styling',()=>pairWardrobeIdea(ideas[index],wardrobe.map(i=>({id:i.id,name:i.name,category:i.category,colors:JSON.parse(i.colors),style:i.style})),req.body?.styleProfile));
   const owned=new Set(wardrobe.map(i=>i.id));
   if(!Array.isArray(pairing.pairWithItemIds)||!pairing.pairWithItemIds.length||pairing.pairWithItemIds.some(id=>!owned.has(id))||typeof pairing.reason!=='string')return res.status(502).json({error:'Could not match this idea to saved pieces. Try again.'});
   ideas[index]={...ideas[index],pairWithItemIds:[...new Set(pairing.pairWithItemIds)].slice(0,3),reason:pairing.reason.slice(0,800)};
@@ -154,7 +162,7 @@ router.post('/:id/ideas/:index/pairings',async(req,res)=>{
   if(!changed.count)return res.status(409).json({error:'The trip changed. Reopen it and try again.'});
   const saved=await prisma.trip.findUniqueOrThrow({where:{id:trip.id}});
   return res.json({...saved,dailyOutfits:JSON.parse(saved.dailyOutfits),packingList:JSON.parse(saved.packingList),suggestedAdditions:ideas});
- }catch{return res.status(500).json({error:'Could not create a wardrobe pairing. Please try again.'});}
+ }catch(error){if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});return res.status(500).json({error:'Could not create a wardrobe pairing. Please try again.'});}
 });
 
 router.patch('/:id/travel',async(req,res)=>{
@@ -220,6 +228,7 @@ router.delete('/:id', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    if(error instanceof ApiError)return res.status(error.statusCode).json({error:error.message,details:error.details});
     console.error('Error deleting trip:', error);
     res.status(500).json({ error: 'Failed to delete trip' });
   }

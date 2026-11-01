@@ -1,3 +1,4 @@
+import { protectCredentials } from '../middleware/abuse';
 import express from 'express';
 import { prisma } from '../lib/prisma';
 import { ApiError } from '../utils/errors';
@@ -9,7 +10,8 @@ export const adminRouter = express.Router();
 // A simple in-memory session token mapping for admin
 // In a real production app you'd use signed JWTs (jsonwebtoken)
 // but for MVP this is perfectly fine and avoids extra dependencies
-const adminSessions = new Set<string>();
+const adminSessions = new Map<string, number>();
+const ADMIN_SESSION_MS = 60 * 60 * 1000;
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
@@ -22,27 +24,35 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
     throw new ApiError(401, 'Admin authentication required');
   }
   const token = authHeader.split(' ')[1];
-  if (!adminSessions.has(token)) {
+  if ((adminSessions.get(token) ?? 0) <= Date.now()) {
+    adminSessions.delete(token);
     throw new ApiError(403, 'Invalid or expired admin token');
   }
   next();
 }
 
-adminRouter.post('/login', (req, res) => {
+adminRouter.post('/login', protectCredentials, (req, res) => {
   const { username, password } = req.body;
   
-  // Use environment variables or fallback for testing
-  const validUsername = process.env.ADMIN_USERNAME ?? 'admin';
-  const validPassword = process.env.ADMIN_PASSWORD ?? 'wardrobe2024';
+  const validUsername = process.env.ADMIN_USERNAME;
+  const validPassword = process.env.ADMIN_PASSWORD;
+  if (!validUsername?.trim() || !validPassword?.trim()) {
+    throw new ApiError(503, 'Admin authentication is not configured');
+  }
 
   if (username === validUsername && password === validPassword) {
     const token = generateToken();
-    adminSessions.add(token);
+    for (const [session, expires] of adminSessions) {
+      if (expires <= Date.now()) adminSessions.delete(session);
+    }
+    adminSessions.set(token, Date.now() + ADMIN_SESSION_MS);
     res.json({ token });
   } else {
     throw new ApiError(401, 'Invalid admin credentials');
   }
 });
+
+adminRouter.use(requireAdmin);
 
 adminRouter.get('/test-supabase', async (req, res) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -50,11 +60,7 @@ adminRouter.get('/test-supabase', async (req, res) => {
   
   const diagnostics = {
     urlSet: !!supabaseUrl,
-    urlLength: supabaseUrl ? supabaseUrl.length : 0,
-    urlPreview: supabaseUrl ? `${supabaseUrl.substring(0, 15)}...${supabaseUrl.substring(supabaseUrl.length - 5)}` : 'none',
     keySet: !!supabaseServiceKey,
-    keyLength: supabaseServiceKey ? supabaseServiceKey.length : 0,
-    keyPreview: supabaseServiceKey ? `${supabaseServiceKey.substring(0, 10)}...${supabaseServiceKey.substring(supabaseServiceKey.length - 5)}` : 'none',
   };
 
   try {
@@ -72,7 +78,7 @@ adminRouter.get('/test-supabase', async (req, res) => {
     if (error) {
       return res.json({
         status: 'failed',
-        error: error.message,
+        error: 'Storage connection check failed',
         diagnostics
       });
     }
@@ -92,14 +98,11 @@ adminRouter.get('/test-supabase', async (req, res) => {
   } catch (err: any) {
     return res.json({
       status: 'error',
-      message: err.message,
-      stack: err.stack,
+      message: 'Storage connection check failed',
       diagnostics
     });
   }
 });
-
-adminRouter.use(requireAdmin);
 
 adminRouter.get('/stats', async (req, res) => {
   const [usersCount, itemsCount, outfitsCount, tripsCount] = await Promise.all([

@@ -1,3 +1,5 @@
+import { ApiError } from '../utils/errors';
+import { withAllowance } from '../services/usage';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -119,11 +121,12 @@ stylistRouter.post('/chat', async (req: Request, res: Response) => {
       history: alternatingHistory,
     });
 
-    const chatResult = await chat.sendMessage(message);
+    const chatResult = await withAllowance(uid,'styling',()=>chat.sendMessage(message));
     const reply = chatResult.response.text() || "I'm not sure about that one — could you rephrase?";
 
     return res.json({ reply });
   } catch (err) {
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
     console.error('[stylist/chat]', err);
 
     const errMsg = err instanceof Error ? err.message : 'Unknown stylist error';
@@ -169,7 +172,7 @@ stylistRouter.post('/challenge', async (req: Request, res: Response) => {
       lastWornAt: item.lastWornAt?.toISOString(),
     }));
 
-    const suggestions = await generateStylingChallenge({
+    const suggestions = await withAllowance(uid,'styling',()=>generateStylingChallenge({
       targetItem: {
         id: targetItem.id,
         name: targetItem.name,
@@ -181,10 +184,11 @@ stylistRouter.post('/challenge', async (req: Request, res: Response) => {
         tags: JSON.parse(targetItem.tags),
       },
       wardrobe: wardrobeContext,
-    });
+    }));
 
     return res.json({ suggestions });
   } catch (err) {
+    if(err instanceof ApiError)return res.status(err.statusCode).json({error:err.message,details:err.details});
     console.error('[stylist/challenge]', err);
     return res.status(500).json({ error: 'Failed to generate challenge' });
   }

@@ -8,7 +8,8 @@
     "build": "prisma generate && tsc",
     "postinstall": "npm run build",
     "prestart": "npm run build",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -19,10 +20,10 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.0.0",
-    "firebase-admin": "^13.10.0",
+    "firebase-admin": "^14.5.0",
     "multer": "^1.4.5-lts.1",
-    "sharp": "^0.34.5",
-    "zod": "^3.24.1"
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -32,5 +33,13 @@
     "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
