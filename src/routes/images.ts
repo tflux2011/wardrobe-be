@@ -22,7 +22,7 @@ const imageSchema = z.object({
   prompt: z.string().min(8).max(2000),
   view: z.enum(['front', 'back']).optional(),
   frontPreviewId: z.string().uuid().optional(),
-  wardrobeContext: z.array(z.record(z.string(),z.any())).max(100).optional().default([]),
+  wardrobeContext: z.array(z.record(z.string(),z.any())).max(200).optional().default([]),
   styleProfile: z
     .object({
       skinTone: z.string().max(64).nullable().optional(),
