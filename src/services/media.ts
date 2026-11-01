@@ -8,7 +8,13 @@ import type { Request, Response, NextFunction } from "express";
 
 export const PRIVATE_BUCKET = "clad-private";
 const pattern = /^\/media\/([0-9a-f-]{36})(?:\?.*)?$/i;
+export function publicApiOrigin(){
+  return new URL(process.env.PUBLIC_API_URL || process.env.RENDER_EXTERNAL_URL || 'https://wardrobe-be-fzoh.onrender.com').origin;
+}
 export function mediaId(url: string): string | null {
+  if(/^https?:\/\//.test(url)){
+    try{const parsed=new URL(url);if(parsed.origin!==publicApiOrigin())return null;url=parsed.pathname+parsed.search;}catch{return null;}
+  }
   return pattern.exec(url)?.[1] ?? null;
 }
 export const canonicalMedia = (url: string) =>
@@ -64,7 +70,7 @@ export function signMediaResponses(
           Object.entries(v).map(([k, x]) => [
             k,
             k === "imageUrl" && typeof x === "string" && req.user
-              ? mediaLink(x, req.user.uid)
+              ? (mediaId(x)?publicApiOrigin()+mediaLink(x,req.user.uid):x)
               : visit(x),
           ]),
         );

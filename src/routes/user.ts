@@ -129,7 +129,7 @@ userRouter.get('/usage',async(req,res)=>res.json(await usageSummary(req.user!.ui
 userRouter.post('/profile', async (req: Request, res: Response) => {
   const uid = (req as any).user?.uid;
   const email = (req as any).user?.email?.toLowerCase().trim();
-  const parsed=z.object({fullName:z.string().trim().min(1).max(120).optional(),gender:z.enum(['Male','Female','Non-binary','Other','male','female','non-binary','other']).optional()}).safeParse(req.body);
+  const parsed=z.object({fullName:z.string().trim().max(120).optional(),gender:z.enum(['Male','Female','Non-binary','Other','male','female','non-binary','other']).optional()}).safeParse(req.body);
   if(!parsed.success)return res.status(400).json({error:'Check your profile details.'});
   const { fullName, gender } = parsed.data;
 

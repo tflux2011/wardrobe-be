@@ -126,7 +126,6 @@ clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,r
   if(!req.file)return res.status(400).json({error:'Choose a full-body photo.'});
   try{
     await resizeImageInPlace(req.file.path);
-    await requirePhotoSpace(req.user!.uid,fs.statSync(req.file.path).size);
     const result=await analyzeBuildPhoto(req.file.path);
     return res.json(validateBuildGuidance(result));
   }catch(error){return res.status(error instanceof ApiError?error.statusCode:502).json({error:error instanceof ApiError?error.message:'Could not assess this photo. You can use measurements instead.'});}

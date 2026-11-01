@@ -1,3 +1,4 @@
+import { weatherRouter } from './routes/weather';
 import dotenv from 'dotenv';
 // Load env vars before any other imports so modules that read process.env at
 // module-evaluation time (e.g. claude_service.ts) see the correct values.
@@ -48,6 +49,7 @@ app.use('/api/images', requireAuth, apiRateLimiter, signMediaResponses, imagesRo
 app.use('/api/outfits', requireAuth, apiRateLimiter, signMediaResponses, outfitsRouter);
 app.use('/api/outfits', requireAuth, apiRateLimiter, signMediaResponses, weeklyRouter);
 app.use('/api/stylist', requireAuth, stylistRateLimiter, apiRateLimiter, signMediaResponses, stylistRouter);
+app.use('/api/weather',requireAuth,apiRateLimiter,weatherRouter);
 app.use('/api/trips', requireAuth, apiRateLimiter, signMediaResponses, tripsRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
