@@ -74,6 +74,21 @@ export function signMediaResponses(
   }) as Response["json"];
   next();
 }
+export async function requirePhotoSpace(uid: string, bytes = 1) {
+  const used =
+    (
+      await prisma.mediaAsset.aggregate({
+        where: { userId: uid },
+        _sum: { bytes: true },
+      })
+    )._sum.bytes ?? 0;
+  if (used + bytes > storageLimit())
+    throw new ApiError(
+      429,
+      "Free some photo storage before adding another photo or preview.",
+      { code: "STORAGE_LIMIT" },
+    );
+}
 export async function savePrivatePhoto(
   bytes: Buffer,
   uid: string,

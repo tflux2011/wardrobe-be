@@ -1,4 +1,4 @@
-import { savePrivatePhoto, privatePhotoBytes } from '../services/media';
+import { savePrivatePhoto, privatePhotoBytes, requirePhotoSpace } from '../services/media';
 import { withAllowance, reserve, settle, reserveImageBudget } from '../services/usage';
 import { ApiError } from '../utils/errors';
 import { Router, Request, Response } from 'express';
@@ -85,6 +85,7 @@ imagesRouter.post('/inspire', async (req: Request, res: Response) => {
 
   const operation=await reserve(req.user!.uid,'views',1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
   try {
+    await requirePhotoSpace(req.user!.uid,1024*1024);
     await reserveImageBudget(1);
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
     if (openaiKey && openaiKey !== 'your_openai_api_key_here') {
@@ -286,6 +287,7 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
       const result = await previews.generate(fingerprint, view, async front => {
         const frontBytes = front ? (await privatePhotoBytes(front.imageUrl)).toString('base64') : undefined;
         return withAllowance(uid,'views',async()=>{
+          await requirePhotoSpace(uid,1024*1024);
           const image = await generateOutfitView(ordered, parsed.data.prompt, JSON.stringify(parsed.data.styleProfile ?? {}), view, frontBytes);
           return {imageUrl:await saveImage(image,uid),mimeType:'image/png'};
         },1,typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined);
@@ -293,6 +295,7 @@ imagesRouter.post(['/outfit', '/outfit/reference'], async (req: Request, res: Re
       return res.json({ ...result, referenceItemIds: ids, generationVersion: 'photo-references-v3' });
     }
     const payload=await withAllowance(uid,'views',async()=>{
+      await requirePhotoSpace(uid,2*1024*1024);
       const result=await generateReferencedOutfit(ordered,parsed.data.prompt,JSON.stringify(parsed.data.styleProfile??{}));
       return {
         front:{imageBase64:result.front,imageUrl:await saveImage(result.front,uid),mimeType:'image/png'},

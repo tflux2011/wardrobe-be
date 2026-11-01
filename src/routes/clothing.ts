@@ -7,7 +7,7 @@ import { validateBuildGuidance } from '../services/build_guidance';
 import sharp from 'sharp';
 import { detectGarmentRegions, tagClothingItem, generateStoreItemMatches, analyzeBuildPhoto } from '../services/claude_service';
 import { prisma } from '../lib/prisma';
-import { savePrivatePhoto } from '../services/media';
+import { savePrivatePhoto, requirePhotoSpace } from '../services/media';
 import { reserve, settle, garmentLimit, reservePlatformBudget, positiveSetting } from '../services/usage';
 import { ApiError } from '../utils/errors';
 
@@ -126,6 +126,7 @@ clothingRouter.post('/build-photo',(req,res,next)=>handleSingleImageUpload(req,r
   if(!req.file)return res.status(400).json({error:'Choose a full-body photo.'});
   try{
     await resizeImageInPlace(req.file.path);
+    await requirePhotoSpace(req.user!.uid,fs.statSync(req.file.path).size);
     const result=await analyzeBuildPhoto(req.file.path);
     return res.json(validateBuildGuidance(result));
   }catch(error){return res.status(error instanceof ApiError?error.statusCode:502).json({error:error instanceof ApiError?error.message:'Could not assess this photo. You can use measurements instead.'});}
@@ -144,6 +145,7 @@ clothingRouter.post('/upload', (req: Request, res: Response, next) => {
   try {
     // 1. Perform in-place image downscaling and compression immediately
     await resizeImageInPlace(req.file.path);
+    await requirePhotoSpace(req.user!.uid,fs.statSync(req.file.path).size);
 
     // 2. Extract clothing tags from the lightweight resized image (~2 seconds)
     const tags = await tagClothingItem(req.file.path);
@@ -196,6 +198,7 @@ clothingRouter.post('/split', (req: Request, res: Response, next) => {
   try {
     // 1. Perform in-place image downscaling and compression immediately
     await resizeImageInPlace(uploadedPath);
+    await requirePhotoSpace(req.user!.uid,fs.statSync(uploadedPath).size);
 
     const metadata = await sharp(uploadedPath).metadata();
     if (!metadata.width || !metadata.height) {
@@ -312,6 +315,7 @@ clothingRouter.post('/match', (req: Request, res: Response, next) => {
   try {
     // 1. Perform in-place image downscaling and compression immediately
     await resizeImageInPlace(req.file.path);
+    await requirePhotoSpace(req.user!.uid,fs.statSync(req.file.path).size);
 
     // 2. Tag photographed retail garment using AI
     const tags = await tagClothingItem(req.file.path);

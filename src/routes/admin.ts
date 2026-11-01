@@ -36,7 +36,7 @@ adminRouter.post('/login', protectCredentials, (req, res) => {
   
   const validUsername = process.env.ADMIN_USERNAME;
   const validPassword = process.env.ADMIN_PASSWORD;
-  if (!validUsername?.trim() || !validPassword?.trim()) {
+  if (!validUsername?.trim() || !validPassword?.trim() || validPassword.length < 12) {
     throw new ApiError(503, 'Admin authentication is not configured');
   }
 
